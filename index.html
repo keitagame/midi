@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>Pure JS MIDI Player</title>
 <style>
-  body { font-family: system-ui, sans-serif; padding: 20px; }
+  body { font-family: system-ui, sans-serif; padding: 20px; background:black; color:white;}
   .log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #111; color: #ddd; padding: 10px; border-radius: 6px; }
   button { margin-right: 8px; }
 </style>
@@ -14,9 +14,53 @@
   <input type="file" id="midiFile" accept=".mid,.midi" />
   <button id="playBtn" disabled>Play</button>
   <button id="stopBtn" disabled>Stop</button>
-  <div class="log" id="log"></div>
+<canvas style="display:none" id="pianoRoll" width="800" height="400"></canvas>
+
+  <div class="log" id="log" style="display:none"></div>
 <input type="file" id="sampleFile" accept=".wav,.mp3" />
 <script>
+let startTicks;
+const roll = document.getElementById("pianoRoll");
+const ctx = roll.getContext("2d");
+let activeNotes = []; // {note, start, end}
+
+function handleNoteOn(note, timeMs) {
+  activeNotes.push({note, start: timeMs, end: null});
+}
+function handleNoteOff(note, timeMs) {
+  const n = activeNotes.find(x => x.note === note && x.end === null);
+  if (n) n.end = timeMs;
+}
+function drawRoll(nowMs) {
+  ctx.clearRect(0, 0, roll.width, roll.height);
+
+  const speed = 0.1; // px/ms
+  const noteHeight = 6;
+
+  activeNotes.forEach(n => {
+    const startX = (n.start - nowMs) * speed + roll.width/2;
+    const endX   = ((n.end ?? nowMs) - nowMs) * speed + roll.width/2;
+    const w = endX - startX;
+    const y = roll.height - (n.note * noteHeight % roll.height);
+
+    ctx.fillStyle = "skyblue";
+    ctx.fillRect(startX, y, w, noteHeight);
+  });
+
+  // 現在位置カーソル
+  ctx.strokeStyle = "red";
+  ctx.beginPath();
+  ctx.moveTo(roll.width/2, 0);
+  ctx.lineTo(roll.width/2, roll.height);
+  ctx.stroke();
+}
+
+function animate() {
+  const nowMs = performance.now() - startTicks;
+  drawRoll(nowMs);
+  requestAnimationFrame(animate);
+}
+
     let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     document.getElementById("sampleFile").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -279,15 +323,16 @@ playBtn.addEventListener('click', () => {
   const tempoMap = buildTempoMap(parsed.tracks, division);
   const all = collectAllEvents(parsed.tracks);
 
-  let startTicks = performance.now(); // msベースのリアルタイム基準
+  startTicks = performance.now(); // msベースのリアルタイム基準
   let idx = 0;
-
+  requestAnimationFrame(animate);
   function step() {
     const lookAhead = 0.1; // 100ms
     const now = performance.now();
     const audioNow = audioCtx.currentTime;
     while (idx < all.length) {
       const ev = all[idx];
+        
       const evTimeMs = ticksToSeconds(ev.absTicks, tempoMap, division) * 1000;
       const deltaMs = evTimeMs - (now - startTicks);
       if (deltaMs <= lookAhead * 1000) {
@@ -299,11 +344,13 @@ playBtn.addEventListener('click', () => {
             case 0x9: { // note on
               const note = ev.p1;
               const vel = ev.p2 || 0;
-              if (vel > 0) synth.noteOn(ch, note, vel,scheduleTime);
-              else synth.noteOff(ch, note, scheduleTime);
+              if (vel > 0){ synth.noteOn(ch, note, vel,scheduleTime); handleNoteOn(note,evTimeMs);
+              }else {synth.noteOff(ch, note, scheduleTime);handleNoteOff(note,evTimeMs); }
               break;
             }
             case 0x8: { // note off
+const note = ev.p1;
+                handleNoteOff(note,evTimeMs); 
               synth.noteOff(ch, ev.p1, scheduleTime);
               break;
             }
@@ -329,7 +376,7 @@ playBtn.addEventListener('click', () => {
       }
     }
     if (idx < all.length) {
-      requestAnimationFrame(step); // 次フレームでまたチェック
+      setTimeout(step, 10);
     } else {
       log("Finished.");
       playBtn.disabled = false;
