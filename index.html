@@ -283,38 +283,42 @@ playBtn.addEventListener('click', () => {
   let idx = 0;
 
   function step() {
+    const lookAhead = 0.1; // 100ms
     const now = performance.now();
+    const audioNow = audioCtx.currentTime;
     while (idx < all.length) {
       const ev = all[idx];
       const evTimeMs = ticksToSeconds(ev.absTicks, tempoMap, division) * 1000;
-      if (evTimeMs <= (now - startTicks)) {
-        // このイベントを今処理する
+      const deltaMs = evTimeMs - (now - startTicks);
+      if (deltaMs <= lookAhead * 1000) {
+    const scheduleTime = Math.abs(audioNow + deltaMs / 1000);
+    
         if (ev.type === "midi") {
           const ch = ev.channel;
           switch (ev.evtType) {
             case 0x9: { // note on
               const note = ev.p1;
               const vel = ev.p2 || 0;
-              if (vel > 0) synth.noteOn(ch, note, vel, audioCtx.currentTime);
-              else synth.noteOff(ch, note, audioCtx.currentTime);
+              if (vel > 0) synth.noteOn(ch, note, vel,scheduleTime);
+              else synth.noteOff(ch, note, scheduleTime);
               break;
             }
             case 0x8: { // note off
-              synth.noteOff(ch, ev.p1, audioCtx.currentTime);
+              synth.noteOff(ch, ev.p1, scheduleTime);
               break;
             }
             case 0xC: {
-              synth.programChange(ch, ev.p1, audioCtx.currentTime);
+              synth.programChange(ch, ev.p1, scheduleTime);
               break;
             }
             case 0xB: {
-              synth.controlChange(ch, ev.p1, ev.p2 || 0, audioCtx.currentTime);
+              synth.controlChange(ch, ev.p1, ev.p2 || 0, scheduleTime);
               break;
             }
             case 0xE: {
               const lsb = ev.p1 || 0, msb = ev.p2 || 0;
               const v14 = (msb << 7) | lsb;
-              synth.pitchBend(ch, v14, audioCtx.currentTime);
+              synth.pitchBend(ch, v14, scheduleTime);
               break;
             }
           }
