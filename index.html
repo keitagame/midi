@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>Pure JS MIDI Player</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 20px; }
+  .log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #111; color: #ddd; padding: 10px; border-radius: 6px; }
+  button { margin-right: 8px; }
+</style>
+</head>
+<body>
+  <h1>Pure JS MIDI Player (No libraries)</h1>
+  <input type="file" id="midiFile" accept=".mid,.midi" />
+  <button id="playBtn" disabled>Play</button>
+  <button id="stopBtn" disabled>Stop</button>
+  <div class="log" id="log"></div>
+<input type="file" id="sampleFile" accept=".wav,.mp3" />
+<script>
+    let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    document.getElementById("sampleFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    const arrayBuffer = event.target.result;
+    sampleBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    console.log("Sample loaded:", file.name);
+  };
+  reader.readAsArrayBuffer(file);
+});
+// --------------------------
+// Minimal MIDI parser (SMF)
+// --------------------------
+function parseMidi(arrayBuffer) {
+  const data = new DataView(arrayBuffer);
+  let offset = 0;
+
+  function readUint32BE() {
+    const v = data.getUint32(offset, false);
+    offset += 4;
+    return v;
+  }
+  function readUint16BE() {
+    const v = data.getUint16(offset, false);
+    offset += 2;
+    return v;
+  }
+  function readBytes(n) {
+    const bytes = [];
+    for (let i = 0; i < n; i++) bytes.push(data.getUint8(offset++));
+    return bytes;
+  }
+  function readStr(n) {
+    return String.fromCharCode(...readBytes(n));
+  }
+  function readVarLen() {
+    let value = 0;
+    while (true) {
+      const b = data.getUint8(offset++);
+      value = (value << 7) | (b & 0x7F);
+      if ((b & 0x80) === 0) break;
+    }
+    return value;
+  }
+
+  const headerId = readStr(4);
+  if (headerId !== "MThd") throw new Error("Invalid MIDI header");
+  const headerLength = readUint32BE(); // usually 6
+  const formatType = readUint16BE();
+  const trackCount = readUint16BE();
+  const division = readUint16BE();
+  // Consume any extra header bytes (rare)
+  if (headerLength > 6) offset += (headerLength - 6);
+
+  const tracks = [];
+  for (let t = 0; t < trackCount; t++) {
+    const trackId = readStr(4);
+    if (trackId !== "MTrk") throw new Error("Invalid Track header");
+    const trackLength = readUint32BE();
+    const trackEnd = offset + trackLength;
+
+    const events = [];
+    let runningStatus = null;
+    let absTicks = 0;
+
+    while (offset < trackEnd) {
+      const delta = readVarLen();
+      absTicks += delta;
+
+      let statusByte = data.getUint8(offset++);
+      if (statusByte < 0x80) {
+        // running status
+        offset--;
+        statusByte = runningStatus;
+      } else {
+        runningStatus = statusByte;
+      }
+
+      if (statusByte === 0xFF) {
+        const metaType = data.getUint8(offset++);
+        const length = readVarLen();
+        const metaData = readBytes(length);
+        events.push({ absTicks, type: "meta", metaType, data: metaData });
+      } else if (statusByte === 0xF0 || statusByte === 0xF7) {
+        const length = readVarLen();
+        const sysExData = readBytes(length);
+        events.push({ absTicks, type: "sysex", data: sysExData });
+      } else {
+        const evtType = statusByte >> 4;
+        const channel = statusByte & 0x0F;
+        const needsTwo = !(evtType === 0xC || evtType === 0xD);
+        const p1 = data.getUint8(offset++);
+        const p2 = needsTwo ? data.getUint8(offset++) : null;
+        events.push({ absTicks, type: "midi", evtType, channel, p1, p2 });
+      }
+    }
+    tracks.push(events);
+  }
+
+  return { header: { formatType, trackCount, division }, tracks };
+}
+
+// -------------------------------------
+// Simple synth and scheduler (WebAudio)
+// -------------------------------------
+function midiNoteToPlaybackRate(note, baseNote = 60) {
+  return Math.pow(2, (note - baseNote) / 12);
+}
+
+class MidiSynth {
+   constructor(audioCtx) {
+    this.audioCtx = audioCtx;
+    this.activeNotes = new Map(); // key: channel-note -> {osc, gain}
+    this.masterGain = audioCtx.createGain();
+    this.masterGain.gain.value = 0.2;
+    this.masterGain.connect(audioCtx.destination);
+  }
+  midiNoteToFreq(n) {
+    return 440 * Math.pow(2, (n - 69) / 12);
+  }
+  noteOn(channel, note, velocity, when) {
+    const src = this.audioCtx.createBufferSource();
+    src.buffer = sampleBuffer;
+    src.playbackRate.value = midiNoteToPlaybackRate(note, this.baseNote);
+
+    const gain = this.audioCtx.createGain();
+    gain.gain.value = velocity / 197;
+
+    src.connect(gain).connect(this.masterGain);
+    src.start(when);
+
+    this.activeNotes.set(`${channel}-${note}`, { src, gain });
+  }
+
+  noteOff(channel, note, when) {
+    const key = `${channel}-${note}`;
+    const entry = this.activeNotes.get(key);
+    if (!entry) return;
+    const { src, gain } = entry;
+    gain.gain.setTargetAtTime(0.0001, when, 0.1);
+    src.stop(when + 0.3);
+    this.activeNotes.delete(key);
+  }
+ 
+  programChange(channel, program, when) {
+    // Placeholder: could change waveform or filter per program.
+    // Keep square for simplicity.
+  }
+  controlChange(channel, controller, value, when) {
+    // Implement if needed (e.g., volume/pan). Not used in this minimal synth.
+  }
+  pitchBend(channel, value14, when) {
+    // Optional: value14 in 0..16383 with center 8192. Could bend osc frequency.
+  }
+}
+let playheadTicks = 0;
+let lastCtxTime = 0;
+
+
+
+
+// Convert ticks to seconds with tempo map
+function buildTempoMap(tracks, division) {
+  // division: ticks per quarter (if positive). SMPTE not supported in this minimal player.
+  const tempoEvents = [];
+  for (const trk of tracks) {
+    for (const ev of trk) {
+      if (ev.type === "meta" && ev.metaType === 0x51 && ev.data.length === 3) {
+        const mpb = (ev.data[0] << 16) | (ev.data[1] << 8) | ev.data[2]; // microseconds per quarter
+        tempoEvents.push({ absTicks: ev.absTicks, microsecPerQuarter: mpb });
+      }
+    }
+  }
+  tempoEvents.sort((a, b) => a.absTicks - b.absTicks);
+  // Default tempo: 500000 microsec/quarter (120 BPM)
+  const segments = [];
+  let lastTick = 0;
+  let currentMicro = 500000;
+  let currentSec = 0;
+
+  segments.push({ startTick: 0, startSec: 0, micro: currentMicro });
+  for (const t of tempoEvents) {
+    const deltaTicks = t.absTicks - lastTick;
+    const secDelta = (deltaTicks * currentMicro) / (division * 1_000_000);
+    currentSec += secDelta;
+    segments.push({ startTick: t.absTicks, startSec: currentSec, micro: t.microsecPerQuarter });
+    lastTick = t.absTicks;
+    currentMicro = t.microsecPerQuarter;
+  }
+  return segments;
+}
+
+function ticksToSeconds(absTicks, segments, division) {
+  // Find last segment where startTick <= absTicks
+  let seg = segments[0];
+  for (let i = 1; i < segments.length; i++) {
+    if (segments[i].startTick <= absTicks) seg = segments[i];
+    else break;
+  }
+  const deltaTicks = absTicks - seg.startTick;
+  const secDelta = (deltaTicks * seg.micro) / (division * 1_000_000);
+  return seg.startSec + secDelta;
+}
+
+// Flatten and sort all events
+function collectAllEvents(tracks) {
+  const all = [];
+  for (const trk of tracks) for (const ev of trk) all.push(ev);
+  all.sort((a, b) => a.absTicks - b.absTicks);
+  return all;
+}
+
+// --------------------------
+// UI / Playback integration
+// --------------------------
+const fileInput = document.getElementById('midiFile');
+const playBtn = document.getElementById('playBtn');
+const stopBtn = document.getElementById('stopBtn');
+const logEl = document.getElementById('log');
+
+let parsed = null;
+
+let synth = null;
+let startAtCtxTime = 0;
+let scheduled = []; // keep for stop
+
+function log(msg) { logEl.textContent += msg + "\n"; }
+
+fileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  try {
+    parsed = parseMidi(buf);
+    log(`Loaded: ${file.name}`);
+    log(`Format: ${parsed.header.formatType}, Tracks: ${parsed.header.trackCount}, Division: ${parsed.header.division}`);
+    playBtn.disabled = false;
+    stopBtn.disabled = true;
+  } catch (err) {
+    log(`Error: ${err.message}`);
+  }
+});
+
+playBtn.addEventListener('click', () => {
+  if (!parsed) return;
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+  synth = new MidiSynth(audioCtx);
+
+  const { division } = parsed.header;
+  if ((division & 0x8000) !== 0) {
+    log("SMPTE division is not supported.");
+    return;
+  }
+
+  const tempoMap = buildTempoMap(parsed.tracks, division);
+  const all = collectAllEvents(parsed.tracks);
+
+  let startTicks = performance.now(); // msベースのリアルタイム基準
+  let idx = 0;
+
+  function step() {
+    const now = performance.now();
+    while (idx < all.length) {
+      const ev = all[idx];
+      const evTimeMs = ticksToSeconds(ev.absTicks, tempoMap, division) * 1000;
+      if (evTimeMs <= (now - startTicks)) {
+        // このイベントを今処理する
+        if (ev.type === "midi") {
+          const ch = ev.channel;
+          switch (ev.evtType) {
+            case 0x9: { // note on
+              const note = ev.p1;
+              const vel = ev.p2 || 0;
+              if (vel > 0) synth.noteOn(ch, note, vel, audioCtx.currentTime);
+              else synth.noteOff(ch, note, audioCtx.currentTime);
+              break;
+            }
+            case 0x8: { // note off
+              synth.noteOff(ch, ev.p1, audioCtx.currentTime);
+              break;
+            }
+            case 0xC: {
+              synth.programChange(ch, ev.p1, audioCtx.currentTime);
+              break;
+            }
+            case 0xB: {
+              synth.controlChange(ch, ev.p1, ev.p2 || 0, audioCtx.currentTime);
+              break;
+            }
+            case 0xE: {
+              const lsb = ev.p1 || 0, msb = ev.p2 || 0;
+              const v14 = (msb << 7) | lsb;
+              synth.pitchBend(ch, v14, audioCtx.currentTime);
+              break;
+            }
+          }
+        }
+        idx++;
+      } else {
+        break; // まだ未来のイベントなので待つ
+      }
+    }
+    if (idx < all.length) {
+      requestAnimationFrame(step); // 次フレームでまたチェック
+    } else {
+      log("Finished.");
+      playBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  }
+
+  playBtn.disabled = true;
+  stopBtn.disabled = false;
+  log("Playing...");
+  requestAnimationFrame(step);
+});
+
+stopBtn.addEventListener('click', () => {
+  // Stop scheduled callbacks
+  for (const id of scheduled) clearTimeout(id);
+  scheduled = [];
+  // Kill active notes
+  if (synth) {
+    const now = audioCtx ? audioCtx.currentTime : 0;
+    for (const key of synth.activeNotes.keys()) {
+      const [ch, note] = key.split('-').map(Number);
+      synth.noteOff(ch, note, now);
+    }
+  }
+  playBtn.disabled = false;
+  stopBtn.disabled = true;
+  log("Stopped.");
+});
+</script>
+</body>
+</html>
