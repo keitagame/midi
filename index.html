@@ -178,7 +178,7 @@ class MidiSynth {
     this.audioCtx = audioCtx;
     this.activeNotes = new Map(); // key: channel-note -> {osc, gain}
     this.masterGain = audioCtx.createGain();
-    this.masterGain.gain.value = 0.2;
+    this.masterGain.gain.value = 1;
     this.masterGain.connect(audioCtx.destination);
   }
   midiNoteToFreq(n) {
