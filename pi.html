@@ -186,13 +186,25 @@ class MidiSynth {
   }
   noteOn(channel, note, velocity, when) {
   const osc = this.audioCtx.createOscillator();
-  osc.type = "square"; // 波形をサウに設定
+  osc.type = "sawtooth"; // 波形をサウに設定
   osc.frequency.value = this.midiNoteToFreq(note);
 
   const gain = this.audioCtx.createGain();
   gain.gain.value = velocity / 127; // velocityを0〜1に正規化
+    const filter = this.audioCtx.createBiquadFilter();
+filter.type = "lowpass";
+filter.frequency.value = 10000; // カットオフ周波数を調整
+const lfo = this.audioCtx.createOscillator();
+lfo.frequency.value = 5; // 5Hzで揺らす
+const lfoGain = this.audioCtx.createGain();
+lfoGain.gain.value = 400; // フィルタ周波数を揺らす幅
 
-  osc.connect(gain).connect(this.masterGain);
+lfo.connect(lfoGain).connect(filter.frequency);
+lfo.start();
+
+osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(this.masterGain);
   osc.start(when);
 
   this.activeNotes.set(`${channel}-${note}`, { osc, gain });
