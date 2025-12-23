@@ -173,65 +173,372 @@ function midiNoteToPlaybackRate(note, baseNote = 60) {
   return Math.pow(2, (note - baseNote) / 12);
 }
 
-class MidiSynth {
-   constructor(audioCtx) {
-    this.audioCtx = audioCtx;
-    this.activeNotes = new Map(); // key: channel-note -> {osc, gain}
-    this.masterGain = audioCtx.createGain();
-    this.masterGain.gain.value = 0.2;
-    this.masterGain.connect(audioCtx.destination);
+// ユーティリティ: Wavetable作成
+function createWavetable(ctx, table) {
+  const real = new Float32Array(table.length);
+  const imag = new Float32Array(table.length);
+  for (let i = 0; i < table.length; i++) {
+    real[i] = table[i];
   }
+  return ctx.createPeriodicWave(real, imag);
+}
+
+// ADSR エンベロープをスケジュール
+function scheduleADSR(param, t, dur, env) {
+  const { a=0.01, d=0.1, s=0.7, r=0.2 } = env;
+  param.setValueAtTime(0, t);
+  param.linearRampToValueAtTime(1, t + a);
+  param.linearRampToValueAtTime(s, t + a + d);
+  const releaseStart = t + dur;
+  param.setValueAtTime(s, releaseStart);
+  param.linearRampToValueAtTime(0, releaseStart + r);
+  return { stopAt: releaseStart + r };
+}
+
+class MidiSynth {
+  constructor(audioCtx) {
+    this.audioCtx = audioCtx;
+    this.master = audioCtx.createGain();
+    this.master.gain.value = 0.3;
+    this.master.connect(audioCtx.destination);
+    
+    this.instruments = new Map(); // 音源名 -> factory関数
+    this.channelInstrumentFactories = new Array(16).fill(null); // チャンネル -> factory
+    this.channelInstrumentOpts = new Array(16).fill(null); // チャンネル -> opts
+    this.activeNotes = new Map(); // key: channel-note -> {voice, stopTime}
+    
+    // デフォルト音源を登録
+    this.registerDefaultInstruments();
+  }
+  
+  // 音源を登録
+  registerInstrument(name, factory) {
+    this.instruments.set(name, factory);
+  }
+  
+  // チャンネルに音源を割り当て
+  setChannelInstrument(channel, instrumentName, opts = {}) {
+    if (channel < 0 || channel >= 16) return;
+    
+    const factory = this.instruments.get(instrumentName);
+    if (!factory) {
+      console.warn(`Instrument "${instrumentName}" not found`);
+      return;
+    }
+    
+    this.channelInstrumentFactories[channel] = factory;
+    this.channelInstrumentOpts[channel] = opts;
+  }
+  
   midiNoteToFreq(n) {
     return 440 * Math.pow(2, (n - 69) / 12);
   }
+  
   noteOn(channel, note, velocity, when) {
-  const osc = this.audioCtx.createOscillator();
-  osc.type = "sawtooth"; // 波形をサウに設定
-  osc.frequency.value = this.midiNoteToFreq(note);
-
-  const gain = this.audioCtx.createGain();
-  gain.gain.value = velocity / 127; // velocityを0〜1に正規化
-    const filter = this.audioCtx.createBiquadFilter();
-filter.type = "lowpass";
-filter.frequency.value = 10000; // カットオフ周波数を調整
-const lfo = this.audioCtx.createOscillator();
-lfo.frequency.value = 5; // 5Hzで揺らす
-const lfoGain = this.audioCtx.createGain();
-lfoGain.gain.value = 400; // フィルタ周波数を揺らす幅
-
-lfo.connect(lfoGain).connect(filter.frequency);
-lfo.start();
-
-osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(this.masterGain);
-  osc.start(when);
-
-  this.activeNotes.set(`${channel}-${note}`, { osc, gain });
-}
-
-noteOff(channel, note, when) {
-  const key = `${channel}-${note}`;
-  const entry = this.activeNotes.get(key);
-  if (!entry) return;
-  const { osc, gain } = entry;
-  gain.gain.setTargetAtTime(0.0001, when, 0.1); // エンベロープで減衰
-  osc.stop(when + 0.3);
-  this.activeNotes.delete(key);
-}
-
- 
+    const factory = this.channelInstrumentFactories[channel];
+    if (!factory) {
+      console.warn(`No instrument on channel ${channel}`);
+      return;
+    }
+    
+    const freq = this.midiNoteToFreq(note);
+    const vel = velocity / 127;
+    const key = `${channel}-${note}`;
+    
+    // 既に同じノートが鳴っていたら停止
+    if (this.activeNotes.has(key)) {
+      this.noteOff(channel, note, when);
+    }
+    
+    // 新しい音源インスタンスを作成
+    const opts = this.channelInstrumentOpts[channel] || {};
+    const voice = factory(this.audioCtx, opts);
+    
+    // ノートを開始 (dur=999で長めに設定、noteOffで実際の長さを決定)
+    voice.start(when, freq, 999, vel);
+    
+    this.activeNotes.set(key, { voice, startTime: when, freq, vel });
+  }
+  
+  noteOff(channel, note, when) {
+    const key = `${channel}-${note}`;
+    const info = this.activeNotes.get(key);
+    if (!info) return;
+    
+    const { voice, startTime } = info;
+    const actualDuration = when - startTime;
+    
+    // リリースフェーズに入る（各音源のstop実装に依存）
+    if (voice && voice.stop) {
+      voice.stop(when, actualDuration);
+    }
+    
+    this.activeNotes.delete(key);
+  }
+  
   programChange(channel, program, when) {
-    // Placeholder: could change waveform or filter per program.
-    // Keep square for simplicity.
+    // プログラムチェンジで音源を切り替え (オプション)
   }
+  
   controlChange(channel, controller, value, when) {
-    // Implement if needed (e.g., volume/pan). Not used in this minimal synth.
+    // CC実装可能
   }
+  
   pitchBend(channel, value14, when) {
-    // Optional: value14 in 0..16383 with center 8192. Could bend osc frequency.
+    // ピッチベンド実装可能
+  }
+  
+  // デフォルト音源を登録
+  registerDefaultInstruments() {
+    // FDS風音源
+    this.registerInstrument('fds', (ctx, opts={}) => {
+      const { gain=0.8, pan=0, table=null, modDepth=0.2, modRate=5 } = opts;
+      const out = ctx.createGain(); out.gain.value = gain;
+      const p = new StereoPannerNode(ctx, { pan }); 
+      out.connect(p).connect(this.master);
+      
+      const defaultTable = Array.from({length:32}, (_,i)=> Math.sin(2*Math.PI*i/32));
+      const wav = createWavetable(ctx, table ?? defaultTable);
+      
+      let osc, lfo, g, lfoGain;
+      
+      return {
+        start(t, freq, dur, vel=1) {
+          osc = ctx.createOscillator();
+          osc.setPeriodicWave(wav);
+          osc.frequency.setValueAtTime(freq, t);
+          
+          lfo = ctx.createOscillator();
+          lfoGain = ctx.createGain();
+          lfo.frequency.setValueAtTime(modRate, t);
+          lfoGain.gain.setValueAtTime(freq * modDepth, t);
+          lfo.connect(lfoGain).connect(osc.frequency);
+          
+          g = ctx.createGain();
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(vel, t + 0.01);
+          g.connect(out);
+          
+          osc.connect(g);
+          lfo.start(t);
+          osc.start(t);
+        },
+        stop(t, actualDur) {
+          if (!g) return;
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(g.gain.value, t);
+          g.gain.linearRampToValueAtTime(0, t + 0.12);
+          const stopAt = t + 0.15;
+          if (lfo) lfo.stop(stopAt);
+          if (osc) osc.stop(stopAt);
+        }
+      };
+    });
+    
+    // サウ波シンセ
+    this.registerInstrument('sawtooth', (ctx, opts={}) => {
+      const { gain=0.4, pan=0, cutoff=2000 } = opts;
+      const out = ctx.createGain(); out.gain.value = gain;
+      const p = new StereoPannerNode(ctx, { pan });
+      out.connect(p).connect(this.master);
+      
+      let osc, filter, g;
+      
+      return {
+        start(t, freq, dur, vel=1) {
+          osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(freq, t);
+          
+          filter = ctx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(cutoff, t);
+          
+          g = ctx.createGain();
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(vel, t + 0.01);
+          g.connect(out);
+          
+          osc.connect(filter).connect(g);
+          osc.start(t);
+        },
+        stop(t, actualDur) {
+          if (!g) return;
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(g.gain.value, t);
+          g.gain.linearRampToValueAtTime(0, t + 0.2);
+          if (osc) osc.stop(t + 0.25);
+        }
+      };
+    });
+    
+    // パルス波ベース
+    this.registerInstrument('pulse', (ctx, opts={}) => {
+      const { gain=0.45, pan=0 } = opts;
+      const out = ctx.createGain(); out.gain.value = gain;
+      const p = new StereoPannerNode(ctx, { pan });
+      out.connect(p).connect(this.master);
+      
+      let osc, g;
+      
+      return {
+        start(t, freq, dur, vel=1) {
+          osc = ctx.createOscillator();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(freq, t);
+          
+          g = ctx.createGain();
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(vel, t + 0.005);
+          g.connect(out);
+          
+          osc.connect(g);
+          osc.start(t);
+        },
+        stop(t, actualDur) {
+          if (!g) return;
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(g.gain.value, t);
+          g.gain.linearRampToValueAtTime(0, t + 0.15);
+          if (osc) osc.stop(t + 0.2);
+        }
+      };
+    });
+    this.registerInstrument('ym2612', (ctx, opts = {}) => {
+  const {
+    gain = 0.4,
+    pan = 0,
+    modIndex = 2.0,   // FM深さ
+    modRatio = 2.0,   // モジュレータ周波数比
+    attack = 0.01,
+    decay = 0.1,
+    sustain = 0.6,
+    release = 0.2
+  } = opts;
+
+  const out = ctx.createGain();
+  out.gain.value = gain;
+
+  const p = new StereoPannerNode(ctx, { pan });
+  out.connect(p).connect(this.master);
+
+  let carrier, mod, amp;
+
+  return {
+    start(t, freq, dur, vel = 1) {
+      // --- モジュレータ ---
+      mod = ctx.createOscillator();
+      mod.type = 'sine';
+      mod.frequency.setValueAtTime(freq * modRatio, t);
+
+      const modGain = ctx.createGain();
+      modGain.gain.setValueAtTime(freq * modIndex, t);
+
+      mod.connect(modGain);
+
+      // --- キャリア ---
+      carrier = ctx.createOscillator();
+      carrier.type = 'sine';
+      carrier.frequency.setValueAtTime(freq, t);
+
+      modGain.connect(carrier.frequency);
+
+      // --- アンプ ---
+      amp = ctx.createGain();
+      amp.gain.setValueAtTime(0, t);
+      amp.gain.linearRampToValueAtTime(vel, t + attack);
+      amp.gain.linearRampToValueAtTime(
+        vel * sustain,
+        t + attack + decay
+      );
+
+      carrier.connect(amp);
+      amp.connect(out);
+
+      mod.start(t);
+      carrier.start(t);
+
+      if (dur) {
+        this.stop(t + dur, dur);
+      }
+    },
+
+    stop(t) {
+      if (!amp) return;
+
+      amp.gain.cancelAndHoldAtTime(t);
+      amp.gain.linearRampToValueAtTime(0, t + release);
+
+      carrier.stop(t + release + 0.05);
+      mod.stop(t + release + 0.05);
+    }
+  };
+});
+
+    // ノイズパーカッション
+    this.registerInstrument('noise', (ctx, opts={}) => {
+      const { gain=2.0, pan=0 } = opts;
+      const out = ctx.createGain(); out.gain.value = gain;
+      const p = new StereoPannerNode(ctx, { pan });
+      out.connect(p).connect(this.master);
+      
+      const createNoiseBuffer = () => {
+        const bufferSize = ctx.sampleRate * 0.5;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        return buffer;
+      };
+      const noiseBuffer = createNoiseBuffer();
+      
+      let noise, filter, g;
+      
+      return {
+        start(t, freq, dur, vel=1) {
+          noise = ctx.createBufferSource();
+          noise.buffer = noiseBuffer;
+          
+          filter = ctx.createBiquadFilter();
+          filter.type = 'bandpass';
+          filter.frequency.setValueAtTime(freq * 8, t);
+          filter.Q.setValueAtTime(5, t);
+          
+          g = ctx.createGain();
+          g.gain.setValueAtTime(vel, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+          g.connect(out);
+          
+          noise.connect(filter).connect(g);
+          noise.start(t);
+          noise.stop(t + 0.1);
+        },
+        stop(t, actualDur) {
+          // ノイズは自動停止するのでstopは不要
+        }
+      };
+    });
   }
 }
+//
+// // チャンネルに音源を割り当て
+// synth.setChannelInstrument(0, 'fds', { modDepth: 0.03, modRate: 6 });
+// synth.setChannelInstrument(1, 'sawtooth', { cutoff: 1500 });
+// synth.setChannelInstrument(2, 'pulse');
+// synth.setChannelInstrument(9, 'noise');
+//
+// // ノートオン/オフ
+// synth.noteOn(0, 60, 100, audioCtx.currentTime);
+// synth.noteOff(0, 60, audioCtx.currentTime + 1);
+//
+// // カスタム音源の登録も可能
+// synth.registerInstrument('custom', (ctx, opts={}) => {
+//   return {
+//     start(t, freq, dur, vel) { /* ... */ },
+//     stop(t, dur) { /* ... */ }
+//   };
+// });
 let playheadTicks = 0;
 let lastCtxTime = 0;
 
@@ -326,6 +633,23 @@ playBtn.addEventListener('click', () => {
     audioCtx.resume();
   }
   synth = new MidiSynth(audioCtx);
+synth.setChannelInstrument(0, 'ym2612');
+synth.setChannelInstrument(1, 'fds', { modDepth: 0.03, modRate: 6 });
+ synth.setChannelInstrument(2, 'sawtooth', { cutoff: 1500 });
+ synth.setChannelInstrument(3, 'ym2612');
+synth.setChannelInstrument(4, 'sawtooth', { cutoff: 1500 });
+synth.setChannelInstrument(5, 'pulse');
+synth.setChannelInstrument(6, 'sawtooth', { cutoff: 1500 });
+synth.setChannelInstrument(7, 'pulse');
+synth.setChannelInstrument(8, 'ym2612');
+ synth.setChannelInstrument(9, 'noise');
+synth.setChannelInstrument(10, 'noise');
+ synth.setChannelInstrument(11, 'pulse');
+synth.setChannelInstrument(12, 'sawtooth', { cutoff: 1500 });
+ synth.setChannelInstrument(13, 'pulse');
+synth.setChannelInstrument(14, 'pulse');
+synth.setChannelInstrument(15, 'pulse');
+synth.setChannelInstrument(16, 'pulse');
 
   const { division } = parsed.header;
   if ((division & 0x8000) !== 0) {
