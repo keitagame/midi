@@ -408,7 +408,7 @@ class MidiSynth {
   const {
     gain = 0.4,
     pan = 0,
-    modIndex = 2.0,   // FM深さ
+    modIndex = 1.0,   // FM深さ
     modRatio = 2.0,   // モジュレータ周波数比
     attack = 0.01,
     decay = 0.1,
@@ -428,7 +428,7 @@ class MidiSynth {
     start(t, freq, dur, vel = 1) {
       // --- モジュレータ ---
       mod = ctx.createOscillator();
-      mod.type = 'sine';
+      mod.type = 'square';
       mod.frequency.setValueAtTime(freq * modRatio, t);
 
       const modGain = ctx.createGain();
@@ -438,7 +438,7 @@ class MidiSynth {
 
       // --- キャリア ---
       carrier = ctx.createOscillator();
-      carrier.type = 'sine';
+      carrier.type = 'sawtooth';
       carrier.frequency.setValueAtTime(freq, t);
 
       modGain.connect(carrier.frequency);
@@ -634,13 +634,13 @@ playBtn.addEventListener('click', () => {
   }
   synth = new MidiSynth(audioCtx);
 synth.setChannelInstrument(0, 'ym2612');
-synth.setChannelInstrument(1, 'fds', { modDepth: 0.03, modRate: 6 });
+synth.setChannelInstrument(1, 'sawtooth', { modDepth: 0.03, modRate: 6 });
  synth.setChannelInstrument(2, 'sawtooth', { cutoff: 1500 });
  synth.setChannelInstrument(3, 'ym2612');
 synth.setChannelInstrument(4, 'sawtooth', { cutoff: 1500 });
 synth.setChannelInstrument(5, 'pulse');
 synth.setChannelInstrument(6, 'sawtooth', { cutoff: 1500 });
-synth.setChannelInstrument(7, 'pulse');
+synth.setChannelInstrument(7, 'sawtooth');
 synth.setChannelInstrument(8, 'ym2612');
  synth.setChannelInstrument(9, 'noise');
 synth.setChannelInstrument(10, 'noise');
