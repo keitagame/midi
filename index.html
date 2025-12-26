@@ -277,8 +277,7 @@ class MidiSynth {
     this.registerInstrument('fds', (ctx, opts={}, channel=0, channelGain=null) => {
       const { gain=0.8, pan=0, table=null, modDepth=0.2, modRate=5 } = opts;
       const out = ctx.createGain(); out.gain.value = gain;
-      const p = new StereoPannerNode(ctx, { pan }); 
-      out.connect(p).connect(channelGain || masterRef);
+      out.connect(channelGain || this.master);
       
       const defaultTable = Array.from({length:32}, (_,i)=> Math.sin(2*Math.PI*i/32));
       const wav = createWavetable(ctx, table ?? defaultTable);
@@ -308,7 +307,7 @@ class MidiSynth {
         },
         stop(t, actualDur) {
           if (!g) return;
-          g.gain.cancelScheduledValues(t);
+         
           g.gain.setValueAtTime(g.gain.value, t);
           g.gain.linearRampToValueAtTime(0, t + 0.12);
           const stopAt = t + 0.15;
@@ -322,8 +321,7 @@ class MidiSynth {
     this.registerInstrument('sawtooth', (ctx, opts={}, channel=0, channelGain=null) => {
       const { gain=0.4, pan=0, cutoff=2000 } = opts;
       const out = ctx.createGain(); out.gain.value = gain;
-      const p = new StereoPannerNode(ctx, { pan });
-      out.connect(p).connect(channelGain || masterRef);
+      out.connect(channelGain || this.master);
       
       let osc, filter, g;
       
@@ -347,7 +345,7 @@ class MidiSynth {
         },
         stop(t, actualDur) {
           if (!g) return;
-          g.gain.cancelScheduledValues(t);
+         
           g.gain.setValueAtTime(g.gain.value, t);
           g.gain.linearRampToValueAtTime(0, t + 0.2);
           if (osc) osc.stop(t + 0.25);
@@ -359,8 +357,7 @@ class MidiSynth {
     this.registerInstrument('pulse', (ctx, opts={}, channel=0, channelGain=null) => {
       const { gain=0.45, pan=0 } = opts;
       const out = ctx.createGain(); out.gain.value = gain;
-      const p = new StereoPannerNode(ctx, { pan });
-      out.connect(p).connect(channelGain || masterRef);
+      out.connect(channelGain || this.master);
       
       let osc, g;
       
@@ -380,7 +377,7 @@ class MidiSynth {
         },
         stop(t, actualDur) {
           if (!g) return;
-          g.gain.cancelScheduledValues(t);
+          
           g.gain.setValueAtTime(g.gain.value, t);
           g.gain.linearRampToValueAtTime(0, t + 0.15);
           if (osc) osc.stop(t + 0.2);
@@ -391,8 +388,7 @@ class MidiSynth {
     this.registerInstrument('ym2612', (ctx, opts={}, channel=0, channelGain=null) => {
       const { gain=0.4, pan=0, modIndex=1.0, modRatio=2.0, attack=0.01, decay=0.1, sustain=0.6, release=0.2 } = opts;
       const out = ctx.createGain(); out.gain.value = gain;
-      const p = new StereoPannerNode(ctx, { pan });
-      out.connect(p).connect(channelGain || masterRef);
+      out.connect(channelGain || this.master);
       
       let carrier, mod, amp;
       
@@ -424,7 +420,7 @@ class MidiSynth {
         },
         stop(t) {
           if (!amp) return;
-          amp.gain.cancelAndHoldAtTime(t);
+          amp.gain.setValueAtTime(amp.gain.value, t);
           amp.gain.linearRampToValueAtTime(0, t + release);
           carrier.stop(t + release + 0.05);
           mod.stop(t + release + 0.05);
@@ -436,8 +432,7 @@ class MidiSynth {
     this.registerInstrument('noise', (ctx, opts={}, channel=0, channelGain=null) => {
       const { gain=19.0, pan=0 } = opts;
       const out = ctx.createGain(); out.gain.value = gain;
-      const p = new StereoPannerNode(ctx, { pan });
-      out.connect(p).connect(channelGain || masterRef);
+      out.connect(channelGain || this.master);
       
       const createNoiseBuffer = () => {
         const bufferSize = ctx.sampleRate * 10;
@@ -480,8 +475,7 @@ this.registerInstrument('noise2', (ctx, opts={}, channel=0, channelGain=null) =>
   const out = ctx.createGain();
   out.gain.value = gain;
 
-  const p = new StereoPannerNode(ctx, { pan });
-  out.connect(p).connect(channelGain || masterRef);
+  out.connect(channelGain || this.master);
 
   // ===== 8bit風 LFSR ノイズ =====
   const createLFSRNoise = () => {
