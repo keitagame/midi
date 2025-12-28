@@ -40,7 +40,11 @@ class SoundFontParser {
     this.data = new DataView(arrayBuffer);
     this.offset = 0;
     this.presets = [];
+    this.presetBags = [];
+    this.presetGens = [];
     this.instruments = [];
+    this.instrumentBags = [];
+    this.instrumentGens = [];
     this.samples = [];
     this.sampleData = null;
   }
@@ -192,7 +196,11 @@ class SoundFontParser {
 
       return {
         presets: this.presets,
+        presetBags: this.presetBags,
+        presetGens: this.presetGens,
         instruments: this.instruments,
+        instrumentBags: this.instrumentBags,
+        instrumentGens: this.instrumentGens,
         samples: this.samples,
         sampleData: this.sampleData
       };
@@ -214,7 +222,6 @@ class SoundFontParser {
         
         console.log(`  pdta sub-chunk: ${subId}, size: ${subSize}, offset: ${subStart}`);
         
-        // サブチャンクサイズの妥当性チェック
         if (subSize > this.data.byteLength - subStart + 8 || subSize < 0) {
           console.warn(`Invalid sub-chunk size: ${subSize}, skipping rest of pdta`);
           break;
@@ -222,27 +229,22 @@ class SoundFontParser {
 
         if (subId === 'phdr' && subSize >= 38) {
           this.parsePresetHeaders(subSize);
-        } else if (subId === 'pbag') {
-          // Preset bags (スキップ)
-        } else if (subId === 'pmod') {
-          // Preset modulators (スキップ)
-        } else if (subId === 'pgen') {
-          // Preset generators (スキップ)
+        } else if (subId === 'pbag' && subSize >= 4) {
+          this.parsePresetBags(subSize);
+        } else if (subId === 'pgen' && subSize >= 4) {
+          this.parsePresetGens(subSize);
         } else if (subId === 'inst' && subSize >= 22) {
           this.parseInstruments(subSize);
-        } else if (subId === 'ibag') {
-          // Instrument bags (スキップ)
-        } else if (subId === 'imod') {
-          // Instrument modulators (スキップ)
-        } else if (subId === 'igen') {
-          // Instrument generators (スキップ)
+        } else if (subId === 'ibag' && subSize >= 4) {
+          this.parseInstrumentBags(subSize);
+        } else if (subId === 'igen' && subSize >= 4) {
+          this.parseInstrumentGens(subSize);
         } else if (subId === 'shdr' && subSize >= 46) {
           this.parseSampleHeaders(subSize);
         }
 
         this.offset = subStart + subSize;
         
-        // アライメント調整
         if (subSize % 2 === 1) {
           this.offset++;
         }
@@ -250,6 +252,70 @@ class SoundFontParser {
         console.warn('Error parsing pdta sub-chunk:', e.message);
         break;
       }
+    }
+  }
+
+  parsePresetBags(size) {
+    const count = Math.floor(size / 4);
+    console.log(`  Parsing ${count} preset bags`);
+    
+    try {
+      for (let i = 0; i < count; i++) {
+        if (this.offset + 4 > this.data.byteLength) break;
+        const genNdx = this.readUint16();
+        const modNdx = this.readUint16();
+        this.presetBags.push({ genNdx, modNdx });
+      }
+    } catch (e) {
+      console.warn('Error parsing preset bags:', e.message);
+    }
+  }
+
+  parsePresetGens(size) {
+    const count = Math.floor(size / 4);
+    console.log(`  Parsing ${count} preset generators`);
+    
+    try {
+      for (let i = 0; i < count; i++) {
+        if (this.offset + 4 > this.data.byteLength) break;
+        const oper = this.readUint16();
+        const amount = this.readUint16();
+        this.presetGens.push({ oper, amount });
+      }
+    } catch (e) {
+      console.warn('Error parsing preset gens:', e.message);
+    }
+  }
+
+  parseInstrumentBags(size) {
+    const count = Math.floor(size / 4);
+    console.log(`  Parsing ${count} instrument bags`);
+    
+    try {
+      for (let i = 0; i < count; i++) {
+        if (this.offset + 4 > this.data.byteLength) break;
+        const genNdx = this.readUint16();
+        const modNdx = this.readUint16();
+        this.instrumentBags.push({ genNdx, modNdx });
+      }
+    } catch (e) {
+      console.warn('Error parsing instrument bags:', e.message);
+    }
+  }
+
+  parseInstrumentGens(size) {
+    const count = Math.floor(size / 4);
+    console.log(`  Parsing ${count} instrument generators`);
+    
+    try {
+      for (let i = 0; i < count; i++) {
+        if (this.offset + 4 > this.data.byteLength) break;
+        const oper = this.readUint16();
+        const amount = this.readUint16();
+        this.instrumentGens.push({ oper, amount });
+      }
+    } catch (e) {
+      console.warn('Error parsing instrument gens:', e.message);
     }
   }
 
@@ -310,7 +376,10 @@ class SoundFontParser {
 
   parseSampleHeaders(size) {
     const count = Math.floor(size / 46);
-    console.log(`  Parsing ${count} sample headers`);
+    console.log(`  Parsing ${count} sample headers (${size} bytes total)`);
+    
+    const startingOffset = this.offset;
+    const tempSamples = [];
     
     try {
       for (let i = 0; i < count; i++) {
@@ -319,51 +388,94 @@ class SoundFontParser {
           break;
         }
         
-        const startOffset = this.offset;
+        const sampleOffset = this.offset;
         
-        const name = this.readString(20);
-        const start = this.readUint32();
-        const end = this.readUint32();
-        const startLoop = this.readUint32();
-        const endLoop = this.readUint32();
-        const sampleRate = this.readUint32();
-        const originalPitch = this.readUint8();
-        const pitchCorrection = this.readInt16();
-        const sampleLink = this.readUint16();
-        const sampleType = this.readUint16();
+        // SF2仕様: 20バイト名前、各4バイト×5、4バイト、1バイト、1バイト、2バイト、2バイト = 46バイト
+        const name = this.readString(20);      // 20 bytes
+        const start = this.readUint32();        // 4 bytes
+        const end = this.readUint32();          // 4 bytes  
+        const startLoop = this.readUint32();    // 4 bytes
+        const endLoop = this.readUint32();      // 4 bytes
+        const sampleRate = this.readUint32();   // 4 bytes
+        const originalPitch = this.readUint8(); // 1 byte
+        const pitchCorrection = this.readInt8(); // 1 byte (符号付き8ビット)
+        const sampleLink = this.readUint16();   // 2 bytes
+        const sampleType = this.readUint16();   // 2 bytes
+        
+        // オフセット確認（46バイト進んだはず）
+        const bytesRead = this.offset - sampleOffset;
+        if (bytesRead !== 46) {
+          console.error(`Sample ${i}: Read ${bytesRead} bytes instead of 46!`);
+        }
 
-        // デバッグ: 最初の数サンプルの詳細を表示
-        if (i < 3) {
-          console.log(`    Sample ${i}: ${name}`);
-          console.log(`      Range: ${start}-${end} (${end-start} samples)`);
-          console.log(`      Loop: ${startLoop}-${endLoop}`);
-          console.log(`      Rate: ${sampleRate}Hz, Pitch: ${originalPitch}`);
+        tempSamples.push({
+          name: name.trim(),
+          start,
+          end,
+          startLoop,
+          endLoop,
+          sampleRate,
+          originalPitch,
+          pitchCorrection,
+          sampleType
+        });
+      }
+      
+      console.log(`  Read ${tempSamples.length} sample headers`);
+      
+      // 最後のサンプル（EOS）を除外して検証
+      for (let i = 0; i < tempSamples.length - 1; i++) {
+        const sample = tempSamples[i];
+        
+        if (i < 5) {
+          console.log(`    Sample ${i}: "${sample.name}"`);
+          console.log(`      Range: ${sample.start}-${sample.end} (${sample.end-sample.start} samples)`);
+          console.log(`      Loop: ${sample.startLoop}-${sample.endLoop}`);
+          console.log(`      Rate: ${sample.sampleRate}Hz, Pitch: ${sample.originalPitch}, Correction: ${sample.pitchCorrection}`);
+          console.log(`      Type: ${sample.sampleType}`);
         }
 
         // 終端サンプル（EOS）をスキップ
-        const isEOS = name.trim() === 'EOS' || name.trim() === '';
+        const isEOS = sample.name === 'EOS' || sample.name === '';
         
-        // 有効なサンプルのみ追加
-        if (i < count - 1 && !isEOS && end > start && sampleRate > 0 && sampleRate < 200000) {
+        // 妥当性チェック
+        const isValidRange = sample.end > sample.start && sample.start >= 0;
+        const isValidRate = sample.sampleRate >= 3000 && sample.sampleRate <= 192000;
+        const isValidPitch = sample.originalPitch >= 0 && sample.originalPitch <= 127;
+        const lengthCheck = (sample.end - sample.start) < 100000000;
+        
+        if (!isEOS && isValidRange && isValidRate && lengthCheck) {
           this.samples.push({
-            name: name.trim(),
-            start,
-            end,
-            startLoop,
-            endLoop,
-            sampleRate,
-            originalPitch: originalPitch > 0 && originalPitch < 128 ? originalPitch : 60,
-            pitchCorrection
+            name: sample.name,
+            start: sample.start,
+            end: sample.end,
+            startLoop: sample.startLoop,
+            endLoop: sample.endLoop,
+            sampleRate: sample.sampleRate,
+            originalPitch: isValidPitch ? sample.originalPitch : 60,
+            pitchCorrection: sample.pitchCorrection
           });
-        } else if (i < 3) {
-          console.log(`      -> Skipped (${isEOS ? 'EOS' : 'invalid'})`);
+        } else if (i < 5) {
+          const reason = isEOS ? 'EOS' : 
+                        !isValidRange ? `invalid range (${sample.start}-${sample.end})` :
+                        !isValidRate ? `invalid rate (${sample.sampleRate}Hz)` :
+                        !lengthCheck ? 'too long' : 'invalid';
+          console.log(`      -> Skipped (${reason})`);
         }
       }
       
-      console.log(`  Successfully parsed ${this.samples.length} valid samples`);
+      console.log(`  Successfully parsed ${this.samples.length} valid samples out of ${tempSamples.length - 1}`);
     } catch (e) {
-      console.warn('Error parsing sample headers:', e.message, 'at offset:', this.offset);
+      console.error('Error parsing sample headers:', e.message, 'at offset:', this.offset);
+      console.error('Stack:', e.stack);
     }
+  }
+  
+  readInt8() {
+    this.checkBounds(1);
+    const v = this.data.getInt8(this.offset);
+    this.offset += 1;
+    return v;
   }
 }
 
@@ -394,7 +506,12 @@ class SoundFontSynth {
     
     // AudioBufferキャッシュ
     this.sampleBuffers = new Map();
+    
+    // プログラム番号ごとのサンプルマッピング
+    this.programToSamples = new Map();
+    
     this.prepareSamples();
+    this.buildProgramMapping();
   }
 
   prepareSamples() {
@@ -404,48 +521,66 @@ class SoundFontSynth {
     }
     
     console.log('Preparing audio buffers from', this.sf.samples.length, 'samples...');
+    console.log('Sample data length:', this.sf.sampleData.length);
+    
+    let validSamples = 0;
+    let invalidSamples = 0;
     
     for (let i = 0; i < this.sf.samples.length; i++) {
       const sample = this.sf.samples[i];
       
+      // デバッグ: 最初の5サンプルを詳細表示
+      if (i < 5) {
+        console.log(`Sample ${i}: "${sample.name}"`);
+        console.log(`  Range: ${sample.start} - ${sample.end} (length: ${sample.end - sample.start})`);
+        console.log(`  Loop: ${sample.startLoop} - ${sample.endLoop}`);
+        console.log(`  Rate: ${sample.sampleRate}Hz, Pitch: ${sample.originalPitch}`);
+      }
+      
       // サンプルの妥当性チェック
       if (sample.start >= sample.end) {
-        console.warn(`Sample ${i} (${sample.name}): invalid range ${sample.start}-${sample.end}`);
+        if (i < 5) console.log(`  ✗ Invalid range`);
+        invalidSamples++;
         continue;
       }
       
       const length = sample.end - sample.start;
       
-      // サンプル長の妥当性チェック
       if (length <= 0 || length > 100000000) {
-        console.warn(`Sample ${i} (${sample.name}): invalid length ${length}`);
+        if (i < 5) console.log(`  ✗ Invalid length: ${length}`);
+        invalidSamples++;
         continue;
       }
       
-      // サンプルデータの範囲チェック
       if (sample.end > this.sf.sampleData.length) {
-        console.warn(`Sample ${i} (${sample.name}): end position ${sample.end} exceeds sample data length ${this.sf.sampleData.length}`);
+        if (i < 5) console.log(`  ✗ Out of bounds: ${sample.end} > ${this.sf.sampleData.length}`);
+        invalidSamples++;
         continue;
       }
       
-      // サンプルレートの妥当性チェック（Web Audio APIの範囲: 3000-768000 Hz）
       let sampleRate = sample.sampleRate;
       if (!sampleRate || sampleRate < 3000 || sampleRate > 768000 || !isFinite(sampleRate)) {
-        console.warn(`Sample ${i} (${sample.name}): invalid sample rate ${sampleRate}Hz, using 44100Hz`);
+        if (i < 5) console.log(`  ⚠ Invalid rate ${sampleRate}Hz, using 44100Hz`);
         sampleRate = 44100;
       }
       
       try {
-        // バッファ作成（検証済みのsampleRateを使用）
         const buffer = this.audioCtx.createBuffer(1, length, sampleRate);
         const channelData = buffer.getChannelData(0);
         
+        // サンプルデータをコピー
+        let hasNonZero = false;
         for (let j = 0; j < length; j++) {
           const sampleValue = this.sf.sampleData[sample.start + j];
           channelData[j] = sampleValue / 32768.0;
+          if (sampleValue !== 0) hasNonZero = true;
         }
         
-        // ループポイントの妥当性チェック
+        // 無音サンプルをチェック
+        if (!hasNonZero) {
+          if (i < 5) console.log(`  ⚠ Silent sample`);
+        }
+        
         let loopStart = sample.startLoop - sample.start;
         let loopEnd = sample.endLoop - sample.start;
         
@@ -457,54 +592,208 @@ class SoundFontSynth {
           loopStart,
           loopEnd,
           originalPitch: sample.originalPitch || 60,
-          sampleRate
+          sampleRate,
+          name: sample.name
         });
         
-        if (i < 3) {
-          console.log(`  ✓ Sample ${i} (${sample.name}): ${length} samples, ${sampleRate}Hz, pitch=${sample.originalPitch}`);
-        }
+        validSamples++;
+        if (i < 5) console.log(`  ✓ Buffer created successfully`);
       } catch (e) {
-        console.warn(`✗ Failed to create buffer for sample ${i} (${sample.name}):`, e.message);
+        if (i < 5) console.log(`  ✗ Failed:`, e.message);
+        invalidSamples++;
       }
     }
     
-    console.log(`Successfully prepared ${this.sampleBuffers.size} audio buffers`);
+    console.log(`Sample preparation complete:`);
+    console.log(`  Valid: ${validSamples}`);
+    console.log(`  Invalid: ${invalidSamples}`);
+    console.log(`  Total buffers: ${this.sampleBuffers.size}`);
+  }
+
+  buildProgramMapping() {
+    console.log('Building program to sample mapping...');
+    console.log(`  Presets: ${this.sf.presets.length}`);
+    console.log(`  Instruments: ${this.sf.instruments.length}`);
+    console.log(`  Samples: ${this.sf.samples.length}`);
+    console.log(`  Valid sample buffers: ${this.sampleBuffers.size}`);
+    console.log(`  PresetBags: ${this.sf.presetBags.length}`);
+    console.log(`  PresetGens: ${this.sf.presetGens.length}`);
+    console.log(`  InstrumentBags: ${this.sf.instrumentBags.length}`);
+    console.log(`  InstrumentGens: ${this.sf.instrumentGens.length}`);
+    
+    // プリセットからインストゥルメント、サンプルへのマッピングを構築
+    for (let presetIdx = 0; presetIdx < this.sf.presets.length; presetIdx++) {
+      const preset = this.sf.presets[presetIdx];
+      const program = preset.preset;
+      const bank = preset.bank;
+      
+      // 通常はbank 0を使用
+      if (bank !== 0 && bank !== 128) continue;
+      
+      // ドラムキット（bank 128）は後で処理
+      const isDrum = (bank === 128);
+      
+      if (presetIdx < 10 || program === 0) {
+        console.log(`\nPreset ${presetIdx}: "${preset.name}" (bank=${bank}, program=${program})`);
+      }
+      
+      const samplesForProgram = new Array(128);
+      
+      // プリセットバッグからインストゥルメントを取得
+      const bagStart = preset.presetBagNdx;
+      const nextPreset = this.sf.presets[presetIdx + 1];
+      const bagEnd = nextPreset ? nextPreset.presetBagNdx : this.sf.presetBags.length;
+      
+      if (presetIdx < 10 || program === 0) {
+        console.log(`  Preset bags: ${bagStart} to ${bagEnd}`);
+      }
+      
+      for (let bagIdx = bagStart; bagIdx < bagEnd; bagIdx++) {
+        const bag = this.sf.presetBags[bagIdx];
+        if (!bag) continue;
+        
+        const genStart = bag.genNdx;
+        const genEnd = this.sf.presetBags[bagIdx + 1]?.genNdx || this.sf.presetGens.length;
+        
+        let keyRange = { lo: 0, hi: 127 };
+        let instrumentIdx = null;
+        
+        // ジェネレータを解析
+        for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
+          const gen = this.sf.presetGens[genIdx];
+          if (!gen) continue;
+          
+          if (gen.oper === 41) { // instrument
+            instrumentIdx = gen.amount;
+          } else if (gen.oper === 43) { // keyRange
+            keyRange.lo = gen.amount & 0xFF;
+            keyRange.hi = (gen.amount >> 8) & 0xFF;
+          }
+        }
+        
+        if (instrumentIdx === null) continue;
+        
+        if (presetIdx < 10 || program === 0) {
+          console.log(`    Bag ${bagIdx}: instrument=${instrumentIdx}, keys=${keyRange.lo}-${keyRange.hi}`);
+        }
+        
+        // インストゥルメントからサンプルを取得
+        if (instrumentIdx < this.sf.instruments.length) {
+          const inst = this.sf.instruments[instrumentIdx];
+          const instBagStart = inst.instBagNdx;
+          const nextInst = this.sf.instruments[instrumentIdx + 1];
+          const instBagEnd = nextInst ? nextInst.instBagNdx : this.sf.instrumentBags.length;
+          
+          for (let iBagIdx = instBagStart; iBagIdx < instBagEnd; iBagIdx++) {
+            const iBag = this.sf.instrumentBags[iBagIdx];
+            if (!iBag) continue;
+            
+            const iGenStart = iBag.genNdx;
+            const iGenEnd = this.sf.instrumentBags[iBagIdx + 1]?.genNdx || this.sf.instrumentGens.length;
+            
+            let iKeyRange = { lo: 0, hi: 127 };
+            let sampleIdx = null;
+            
+            for (let iGenIdx = iGenStart; iGenIdx < iGenEnd; iGenIdx++) {
+              const iGen = this.sf.instrumentGens[iGenIdx];
+              if (!iGen) continue;
+              
+              if (iGen.oper === 53) { // sampleID
+                sampleIdx = iGen.amount;
+              } else if (iGen.oper === 43) { // keyRange
+                iKeyRange.lo = iGen.amount & 0xFF;
+                iKeyRange.hi = (iGen.amount >> 8) & 0xFF;
+              }
+            }
+            
+            if (sampleIdx === null) continue;
+            
+            // キーレンジを統合
+            const finalLo = Math.max(keyRange.lo, iKeyRange.lo);
+            const finalHi = Math.min(keyRange.hi, iKeyRange.hi);
+            
+            // ★重要: sampleBuffersに実際に存在するかチェック
+            if (this.sampleBuffers.has(sampleIdx)) {
+              const sampleInfo = this.sampleBuffers.get(sampleIdx);
+              if (presetIdx < 10 || program === 0) {
+                console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi}`);
+              }
+              
+              for (let note = finalLo; note <= finalHi; note++) {
+                samplesForProgram[note] = sampleIdx;
+              }
+            } else {
+              // サンプルが無効な場合はスキップ
+              if (presetIdx < 3) {
+                console.warn(`      Sample ${sampleIdx} not available (invalid or out of range)`);
+              }
+            }
+          }
+        }
+      }
+      
+      // マッピングを保存
+      const mappedNotes = samplesForProgram.filter(s => s !== undefined).length;
+      if (mappedNotes > 0) {
+        this.programToSamples.set(program, samplesForProgram);
+        if (presetIdx < 10 || program === 0) {
+          console.log(`  -> Mapped ${mappedNotes}/128 notes to samples`);
+        }
+      } else {
+        if (presetIdx < 10 || program === 0) {
+          console.warn(`  -> No valid samples mapped for program ${program}`);
+        }
+      }
+    }
+    
+    console.log(`\nMapping complete: ${this.programToSamples.size} programs successfully mapped`);
+    console.log(`Programs with samples:`, Array.from(this.programToSamples.keys()).slice(0, 20));
   }
 
   findSample(program, note) {
-    // 簡易的な実装: プログラム番号とノート番号に基づいてサンプルを選択
-    
     // サンプルが無い場合
     if (this.sampleBuffers.size === 0) {
       console.warn('No samples available');
       return null;
     }
     
-    // プログラム番号をサンプル数の範囲にマッピング
-    const sampleCount = this.sampleBuffers.size;
-    let sampleIndex = Math.min(program % sampleCount, sampleCount - 1);
+    // プログラム番号のマッピングを使用
+    const samplesForProgram = this.programToSamples.get(program);
     
-    // 最も近いサンプルを探す（ピッチベース）
-    let bestIndex = sampleIndex;
+    if (samplesForProgram && samplesForProgram[note] !== undefined) {
+      const sampleIdx = samplesForProgram[note];
+      const sample = this.sampleBuffers.get(sampleIdx);
+      
+      // デバッグ: 最初の数回のノートオンをログ
+      if (this.debugCount === undefined) this.debugCount = 0;
+      if (this.debugCount < 10) {
+        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sample?.name}, pitch=${sample?.originalPitch}`);
+        this.debugCount++;
+      }
+      
+      return sample;
+    }
+    
+    // フォールバック: 最も近いピッチのサンプルを探す
+    let bestIndex = 0;
     let bestDiff = 999;
     
-    for (let i = 0; i < sampleCount; i++) {
-      const info = this.sampleBuffers.get(i);
-      if (!info) continue;
-      
+    this.sampleBuffers.forEach((info, idx) => {
       const diff = Math.abs(info.originalPitch - note);
       if (diff < bestDiff) {
         bestDiff = diff;
-        bestIndex = i;
+        bestIndex = idx;
       }
+    });
+    
+    const fallbackSample = this.sampleBuffers.get(bestIndex);
+    
+    if (this.debugCount < 10) {
+      console.log(`Program ${program}, Note ${note} -> Fallback Sample ${bestIndex}: ${fallbackSample?.name}, pitch=${fallbackSample?.originalPitch}`);
+      this.debugCount++;
     }
     
-    // ピッチ差が大きすぎる場合はプログラム番号ベースに戻す
-    if (bestDiff > 36) {
-      bestIndex = sampleIndex;
-    }
-    
-    return this.sampleBuffers.get(bestIndex);
+    return fallbackSample;
   }
 
   noteOn(channel, note, velocity, when) {
@@ -518,31 +807,46 @@ class SoundFontSynth {
       this.noteOff(channel, note, when);
     }
     
+    // 時刻が負の値にならないように保証
+    const now = this.audioCtx.currentTime;
+    const scheduleTime = Math.max(when, now);
+    
     const source = this.audioCtx.createBufferSource();
     source.buffer = sampleInfo.buffer;
     
-    // ピッチ調整
+    // ピッチ調整（セント単位で正確に）
     const pitchOffset = note - sampleInfo.originalPitch;
-    source.playbackRate.value = Math.pow(2, pitchOffset / 12);
+    const playbackRate = Math.pow(2, pitchOffset / 12);
+    source.playbackRate.value = playbackRate;
     
-    // ループ設定
+    // ループ設定（有効なループポイントがある場合のみ）
     if (sampleInfo.loopStart > 0 && sampleInfo.loopEnd > sampleInfo.loopStart) {
       source.loop = true;
-      source.loopStart = sampleInfo.loopStart / sampleInfo.buffer.sampleRate;
-      source.loopEnd = sampleInfo.loopEnd / sampleInfo.buffer.sampleRate;
+      const duration = sampleInfo.buffer.duration;
+      const sampleRate = sampleInfo.buffer.sampleRate;
+      source.loopStart = sampleInfo.loopStart / sampleRate;
+      source.loopEnd = sampleInfo.loopEnd / sampleRate;
     }
     
+    // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
-    const vel = velocity / 127;
-    gain.gain.setValueAtTime(0, when);
-    gain.gain.linearRampToValueAtTime(vel, when + 0.01);
+    const vel = Math.pow(velocity / 127, 1.5); // ベロシティカーブを適用
+    gain.gain.setValueAtTime(0, scheduleTime);
+    gain.gain.linearRampToValueAtTime(vel * 0.8, scheduleTime + 0.005);
     
-    source.connect(gain);
+    // フィルター追加（高周波ノイズを減らす）
+    const filter = this.audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 8000;
+    filter.Q.value = 0.5;
+    
+    source.connect(filter);
+    filter.connect(gain);
     gain.connect(this.channelGains[channel]);
     
-    source.start(when);
+    source.start(scheduleTime);
     
-    this.activeNotes.set(key, { source, gain, startTime: when });
+    this.activeNotes.set(key, { source, gain, startTime: scheduleTime });
   }
 
   noteOff(channel, note, when) {
@@ -552,15 +856,21 @@ class SoundFontSynth {
     
     const { source, gain } = info;
     
-    gain.gain.setValueAtTime(gain.gain.value, when);
-    gain.gain.linearRampToValueAtTime(0, when + 0.2);
-    source.stop(when + 0.25);
+    // 時刻が負の値にならないように保証
+    const now = this.audioCtx.currentTime;
+    const scheduleTime = Math.max(when, now);
+    
+    gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.2);
+    source.stop(scheduleTime + 0.25);
     
     this.activeNotes.delete(key);
   }
 
   programChange(channel, program) {
+    if (program < 0 || program > 127) return;
     this.channelPrograms[channel] = program;
+    console.log(`Channel ${channel} -> Program ${program}`);
   }
 }
 
@@ -852,7 +1162,7 @@ playBtn.addEventListener('click', () => {
   function step() {
     if (!isPlaying) return;
     
-    const lookAhead = 0.1;
+    const lookAhead = 0.15; // ルックアヘッドを150msに延長
     const now = performance.now();
     const audioNow = audioCtx.currentTime;
     
@@ -862,7 +1172,8 @@ playBtn.addEventListener('click', () => {
       const deltaMs = evTimeMs - (now - startTicks);
       
       if (deltaMs <= lookAhead * 1000) {
-        const scheduleTime = audioNow + deltaMs / 1000;
+        // スケジュール時刻を計算（最小でも現在時刻+10msを保証）
+        const scheduleTime = Math.max(audioNow + deltaMs / 1000, audioNow + 0.01);
         
         if (ev.type === "midi") {
           const ch = ev.channel;
