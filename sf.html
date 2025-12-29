@@ -733,10 +733,12 @@ class SoundFontSynth {
               if (presetIdx < 10 || program === 0) {
                 console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi}`);
               }
-              
-              for (let note = finalLo; note <= finalHi; note++) {
+              if(finalHi < 70){
+              for (let note = 0; note <= 127; note++) {
                 samplesForProgram[note] = sampleIdx;
+                
               }
+}
             } else {
               // サンプルが無効な場合はスキップ
               if (presetIdx < 3) {
@@ -811,7 +813,7 @@ class SoundFontSynth {
     return fallbackSample;
   }
 
-  noteOn(channel, note, velocity, when,compressor) {
+  noteOn(channel, note, velocity, when) {
     const program = this.channelPrograms[channel];
     const sampleInfo = this.findSample(program, note);
     
@@ -827,14 +829,16 @@ class SoundFontSynth {
     const scheduleTime = Math.max(when, now);
     
     const source = this.audioCtx.createBufferSource();
-    source.connect(compressor).connect(this.audioCtx.destination);
+    
     source.buffer = sampleInfo.buffer;
     const pitch = sampleInfo.originalPitch + sampleInfo.zure;
     console.log(sampleInfo.zure);
     // ピッチ調整（セント単位で正確に）
     const pitchOffset = note - pitch;
-    console.log(pitch);
+    
+    console.log(pitchOffset);
     const playbackRate = Math.pow(2, pitchOffset / 12);
+    console.log(playbackRate);
     source.playbackRate.value = playbackRate;
     
     // ループ設定（有効なループポイントがある場合のみ）
@@ -852,7 +856,7 @@ class SoundFontSynth {
     
     console.log(vel);
     gain.gain.setValueAtTime(0, scheduleTime);
-    gain.gain.linearRampToValueAtTime(1.1 * 0.8, scheduleTime + 0.005);
+    gain.gain.linearRampToValueAtTime(vel * 0.8, scheduleTime + 0.005);
     
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
@@ -1166,13 +1170,7 @@ playBtn.addEventListener('click', () => {
   
   initVisualizer();
   synth = new SoundFontSynth(audioCtx, soundFont);
-  const compressor = audioCtx.createDynamicsCompressor();
-
-compressor.threshold.value = -4;
-compressor.knee.value = 3;
-compressor.ratio.value = 1;
-compressor.attack.value = 0.003;
-compressor.release.value = 0.25;
+  
 
 
   const { division } = parsed.header;
@@ -1210,7 +1208,7 @@ compressor.release.value = 0.25;
               const note = ev.p1;
               const vel = ev.p2 || 0;
               if (vel > 0) {
-                synth.noteOn(ch, note, vel, scheduleTime,compressor);
+                synth.noteOn(ch, note, vel, scheduleTime);
               } else {
                 synth.noteOff(ch, note, scheduleTime);
               }
