@@ -733,12 +733,14 @@ class SoundFontSynth {
               if (presetIdx < 10 || program === 0) {
                 console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi}`);
               }
-              if(finalHi < 70){
-              for (let note = 0; note <= 127; note++) {
+              if(finalLo < 60){
+              for (let note = 0; note <= 172; note++) {
+                
                 samplesForProgram[note] = sampleIdx;
                 
               }
-}
+              }
+
             } else {
               // サンプルが無効な場合はスキップ
               if (presetIdx < 3) {
