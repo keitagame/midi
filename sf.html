@@ -34,6 +34,11 @@
   <div class="log" id="log"></div>
 
 <script>
+    function attenuationToGain(att) {
+  // att は 0.1dB 単位
+  return Math.pow(10, -(att / 10) / 20);
+}
+
 // ============ SoundFont Parser ============
 class SoundFontParser {
   constructor(arrayBuffer) {
@@ -430,7 +435,8 @@ class SoundFontParser {
           originalPitch,
           pitchCorrection,
           sampleType,
-          zure: zure
+          zure: zure,
+          attenuation: 0  
         });
       }
       
@@ -467,7 +473,8 @@ class SoundFontParser {
             sampleRate: sample.sampleRate,
             originalPitch: isValidPitch ? sample.originalPitch : 60,
             pitchCorrection: sample.pitchCorrection,
-            zure: sample.zure
+            zure: sample.zure,
+            attenuation: 0
           });
         } else if (i < 5) {
           const reason = isEOS ? 'EOS' : 
@@ -499,7 +506,7 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.5;
+    this.master.gain.value = 0.2;
     this.master.connect(audioCtx.destination);
     
     this.channelAnalysers = [];
@@ -608,7 +615,8 @@ class SoundFontSynth {
           originalPitch: sample.originalPitch || 60,
           sampleRate,
           name: sample.name,
-          zure: sample.zure
+          zure: sample.zure,
+          attenuation: 0  
         });
         
         validSamples++;
@@ -672,12 +680,15 @@ class SoundFontSynth {
         
         let keyRange = { lo: 0, hi: 127 };
         let instrumentIdx = null;
-        
+        let attenuation = 0;
         // ジェネレータを解析
         for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
           const gen = this.sf.presetGens[genIdx];
           if (!gen) continue;
-          
+          if (gen.oper === 48) {
+         attenuation += gen.amount; // 0.1dB単位
+}
+
           if (gen.oper === 41) { // instrument
             instrumentIdx = gen.amount;
           } else if (gen.oper === 43) { // keyRange
@@ -708,11 +719,13 @@ class SoundFontSynth {
             
             let iKeyRange = { lo: 0, hi: 127 };
             let sampleIdx = null;
-            
+            let attenuation = 0;
             for (let iGenIdx = iGenStart; iGenIdx < iGenEnd; iGenIdx++) {
               const iGen = this.sf.instrumentGens[iGenIdx];
               if (!iGen) continue;
-              
+               if (iGen.oper === 48) {
+         attenuation += iGen.amount; // 0.1dB単位
+}
               if (iGen.oper === 53) { // sampleID
                 sampleIdx = iGen.amount;
               } else if (iGen.oper === 43) { // keyRange
@@ -854,11 +867,14 @@ class SoundFontSynth {
    
     // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
-    const vel = Math.pow(velocity / 127, 0.5); // ベロシティカーブを適用
-    
+    const vel = Math.pow(velocity / 127, 1.2); // ベロシティカーブを適用
+   
+const instGain = attenuationToGain(sampleInfo.attenuation);
+
+
     console.log(vel);
     gain.gain.setValueAtTime(0, scheduleTime);
-    gain.gain.linearRampToValueAtTime(vel * 0.8, scheduleTime + 0.005);
+    gain.gain.linearRampToValueAtTime(vel * instGain, scheduleTime + 0.005);
     
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
