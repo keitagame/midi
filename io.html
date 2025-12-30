@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>MIDI Player with SoundFont (.sf2)</title>
 <style>
-  body { font-family: system-ui, sans-serif; padding: 0px; background:black; color:white;margin:0;}
+  body { font-family: system-ui, sans-serif; padding: 20px; background:black; color:white;}
   .log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
   button { margin-right: 8px; padding: 8px 16px; }
   .file-input { margin: 10px 0; }
@@ -34,12 +34,10 @@
   <div class="log" id="log"></div>
 
 <script>
-const analyserBuffers = Array.from({ length: 16 }, () => new Uint8Array(1024));
-const masterWaveBuffer = new Uint8Array(1024);
-
-let lastFrameTime = 0;
-const TARGET_FPS = 120; // 60 / 120 / 144 など
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
+    function attenuationToGain(att) {
+  // att は 0.1dB 単位
+  return Math.pow(10, -(att / 10) / 20);
+}
 
 // ============ SoundFont Parser ============
 class SoundFontParser {
@@ -437,7 +435,8 @@ class SoundFontParser {
           originalPitch,
           pitchCorrection,
           sampleType,
-          zure: zure
+          zure: zure,
+          attenuation: 0  
         });
       }
       
@@ -474,7 +473,8 @@ class SoundFontParser {
             sampleRate: sample.sampleRate,
             originalPitch: isValidPitch ? sample.originalPitch : 60,
             pitchCorrection: sample.pitchCorrection,
-            zure: sample.zure
+            zure: sample.zure,
+            attenuation: 0
           });
         } else if (i < 5) {
           const reason = isEOS ? 'EOS' : 
@@ -506,16 +506,10 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.5;
+    this.master.gain.value = 0.2;
     this.master.connect(audioCtx.destination);
-    this.masterAnalyser = audioCtx.createAnalyser();
-this.masterAnalyser.fftSize = 1024;
-
-// master → analyser → destination
-this.master.disconnect();
-this.master.connect(this.masterAnalyser);
-this.masterAnalyser.connect(audioCtx.destination);
-  this.channelAnalysers = [];
+    
+    this.channelAnalysers = [];
     this.channelGains = [];
     for (let i = 0; i < 16; i++) {
       const analyser = audioCtx.createAnalyser();
@@ -621,7 +615,8 @@ this.masterAnalyser.connect(audioCtx.destination);
           originalPitch: sample.originalPitch || 60,
           sampleRate,
           name: sample.name,
-          zure: sample.zure
+          zure: sample.zure,
+          attenuation: 0  
         });
         
         validSamples++;
@@ -685,12 +680,15 @@ this.masterAnalyser.connect(audioCtx.destination);
         
         let keyRange = { lo: 0, hi: 127 };
         let instrumentIdx = null;
-        
+        let attenuation = 0;
         // ジェネレータを解析
         for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
           const gen = this.sf.presetGens[genIdx];
           if (!gen) continue;
-          
+          if (gen.oper === 48) {
+         attenuation += gen.amount; // 0.1dB単位
+}
+
           if (gen.oper === 41) { // instrument
             instrumentIdx = gen.amount;
           } else if (gen.oper === 43) { // keyRange
@@ -721,11 +719,13 @@ this.masterAnalyser.connect(audioCtx.destination);
             
             let iKeyRange = { lo: 0, hi: 127 };
             let sampleIdx = null;
-            
+            let attenuation = 0;
             for (let iGenIdx = iGenStart; iGenIdx < iGenEnd; iGenIdx++) {
               const iGen = this.sf.instrumentGens[iGenIdx];
               if (!iGen) continue;
-              
+               if (iGen.oper === 48) {
+         attenuation += iGen.amount; // 0.1dB単位
+}
               if (iGen.oper === 53) { // sampleID
                 sampleIdx = iGen.amount;
               } else if (iGen.oper === 43) { // keyRange
@@ -767,7 +767,9 @@ this.masterAnalyser.connect(audioCtx.destination);
       // マッピングを保存
       const mappedNotes = samplesForProgram.filter(s => s !== undefined).length;
       if (mappedNotes > 0) {
-        this.programToSamples.set(program, samplesForProgram);
+       const key = `${bank}:${program}`;
+this.programToSamples.set(key, samplesForProgram);
+
         if (presetIdx < 10 || program === 0) {
           console.log(`  -> Mapped ${mappedNotes}/128 notes to samples`);
         }
@@ -782,7 +784,10 @@ this.masterAnalyser.connect(audioCtx.destination);
     console.log(`Programs with samples:`, Array.from(this.programToSamples.keys()).slice(0, 20));
   }
 
-  findSample(program, note) {
+  findSample(channel, program, note) {
+  const bank = (channel === 9) ? 128 : 0;
+  const key = `${bank}:${program}`;
+  const samplesForProgram = this.programToSamples.get(key);
     // サンプルが無い場合
     if (this.sampleBuffers.size === 0) {
       console.warn('No samples available');
@@ -790,7 +795,7 @@ this.masterAnalyser.connect(audioCtx.destination);
     }
     
     // プログラム番号のマッピングを使用
-    const samplesForProgram = this.programToSamples.get(program);
+   
     
     if (samplesForProgram && samplesForProgram[note] !== undefined) {
       const sampleIdx = samplesForProgram[note];
@@ -829,8 +834,10 @@ this.masterAnalyser.connect(audioCtx.destination);
   }
 
   noteOn(channel, note, velocity, when) {
-    const program = this.channelPrograms[channel];
-    const sampleInfo = this.findSample(program, note);
+   // noteOn 側
+const program = this.channelPrograms[channel];
+const sampleInfo = this.findSample(channel, program, note);
+
     
     if (!sampleInfo) return;
     
@@ -867,11 +874,14 @@ this.masterAnalyser.connect(audioCtx.destination);
    
     // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
-    const vel = Math.pow(velocity / 127, 0.5); // ベロシティカーブを適用
-    
+    const vel = Math.pow(velocity / 127, 1.2); // ベロシティカーブを適用
+   
+const instGain = attenuationToGain(sampleInfo.attenuation);
+
+
     console.log(vel);
     gain.gain.setValueAtTime(0, scheduleTime);
-    gain.gain.linearRampToValueAtTime(vel * 0.8, scheduleTime + 0.005);
+    gain.gain.linearRampToValueAtTime(vel * instGain, scheduleTime + 0.005);
     
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
@@ -907,10 +917,10 @@ this.masterAnalyser.connect(audioCtx.destination);
   }
 
   programChange(channel, program) {
-    if (program < 0 || program > 127) return;
-    this.channelPrograms[channel] = program;
-    console.log(`Channel ${channel} -> Program ${program}`);
-  }
+  if (channel === 9) return; // ドラムは program 無視
+  this.channelPrograms[channel] = program;
+}
+
 }
 
 // ============ MIDI Parser (元のコードから) ============
@@ -1047,71 +1057,75 @@ function collectAllEvents(tracks) {
   return all;
 }
 
+// ============ Visualizer ============
 function initVisualizer() {
   const container = document.getElementById('visualizer');
   container.innerHTML = '';
-
-  const canvas = document.createElement('canvas');
-  canvas.id = 'masterCanvas';
-
-  const cssWidth = 800;
-  const cssHeight = 200;
-  const dpr = window.devicePixelRatio || 1;
-
-  canvas.width = cssWidth * dpr;
-  canvas.height = cssHeight * dpr;
-  canvas.style.width ='100vw';
-  canvas.style.height = cssHeight + 'px';
-  canvas.style.display = 'block';
-  canvas.style.background = '#000';
-
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  container.appendChild(canvas);
+  
+  for (let i = 0; i < 16; i++) {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'background:#000; padding:0px;';
+    
+    const label = document.createElement('div');
+    label.textContent = `Ch ${i}`;
+    label.style.cssText = 'font-size:11px; color:#aaa; margin-bottom:0px;';
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = 200;
+    canvas.height = 60;
+    canvas.id = `canvas${i}`;
+    canvas.style.cssText = 'width:100%; height:60px; display:block;';
+    
+    wrapper.appendChild(label);
+    wrapper.appendChild(canvas);
+    container.appendChild(wrapper);
+  }
 }
-
 
 let animationId = null;
 function animate(synth) {
   if (!synth) return;
-
-  const canvas = document.getElementById('masterCanvas');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  const analyser = synth.masterAnalyser;
-
-  analyser.getByteTimeDomainData(masterWaveBuffer);
-
-  const w = canvas.width / (window.devicePixelRatio || 1);
-  const h = canvas.height / (window.devicePixelRatio || 1);
-  const centerY = h / 2;
-
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.lineWidth = 0.8;
-  ctx.strokeStyle = '#fff';
-  ctx.beginPath();
-
-  const sliceWidth = w / masterWaveBuffer.length;
-  let x = 0;
-
-  for (let i = 0; i < masterWaveBuffer.length; i++) {
-    const v = masterWaveBuffer[i] / 128.0; // 0–2
-    const y = centerY + (v - 1.0) * centerY;
-
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-
-    x += sliceWidth;
+  
+  for (let i = 0; i < 16; i++) {
+    const canvas = document.getElementById(`canvas${i}`);
+    if (!canvas) continue;
+    
+    const ctx = canvas.getContext('2d');
+    const analyser = synth.channelAnalysers[i];
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    analyser.getByteTimeDomainData(dataArray);
+    
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = `hsl(${i * 22.5}, 100%, 60%)`;
+    ctx.beginPath();
+    
+    const sliceWidth = canvas.width / bufferLength;
+    let x = 0;
+    
+    for (let j = 0; j < bufferLength; j++) {
+      const v = dataArray[j] / 128.0;
+      const y = v * canvas.height / 2;
+      
+      if (j === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+      
+      x += sliceWidth;
+    }
+    
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
   }
-
-  ctx.stroke();
+  
   animationId = requestAnimationFrame(() => animate(synth));
 }
-
 
 // ============ UI ============
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
