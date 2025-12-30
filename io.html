@@ -38,7 +38,7 @@
   // att は 0.1dB 単位
   return Math.pow(10, -(att / 10) / 20);
 }
-
+let rootKey = null;
 // ============ SoundFont Parser ============
 class SoundFontParser {
   constructor(arrayBuffer) {
@@ -613,6 +613,7 @@ class SoundFontSynth {
           loopStart,
           loopEnd,
           originalPitch: sample.originalPitch || 60,
+            pitchCorrection: sample.pitchCorrection ?? 0,
           sampleRate,
           name: sample.name,
           zure: sample.zure,
@@ -705,15 +706,18 @@ class SoundFontSynth {
         
         // インストゥルメントからサンプルを取得
         if (instrumentIdx < this.sf.instruments.length) {
+           
           const inst = this.sf.instruments[instrumentIdx];
           const instBagStart = inst.instBagNdx;
           const nextInst = this.sf.instruments[instrumentIdx + 1];
           const instBagEnd = nextInst ? nextInst.instBagNdx : this.sf.instrumentBags.length;
-          
+         
           for (let iBagIdx = instBagStart; iBagIdx < instBagEnd; iBagIdx++) {
             const iBag = this.sf.instrumentBags[iBagIdx];
             if (!iBag) continue;
-            
+             let coarseTune = 0;
+let fineTune = 0;
+ let rootKey = null;
             const iGenStart = iBag.genNdx;
             const iGenEnd = this.sf.instrumentBags[iBagIdx + 1]?.genNdx || this.sf.instrumentGens.length;
             
@@ -723,6 +727,11 @@ class SoundFontSynth {
             for (let iGenIdx = iGenStart; iGenIdx < iGenEnd; iGenIdx++) {
               const iGen = this.sf.instrumentGens[iGenIdx];
               if (!iGen) continue;
+if (iGen.oper === 58) { // overridingRootKey
+    rootKey = iGen.amount;
+  }
+if (iGen.oper === 51) coarseTune += iGen.amount; // semitone
+if (iGen.oper === 52) fineTune   += iGen.amount; // cent
                if (iGen.oper === 48) {
          attenuation += iGen.amount; // 0.1dB単位
 }
@@ -733,7 +742,7 @@ class SoundFontSynth {
                 iKeyRange.hi = (iGen.amount >> 8) & 0xFF;
               }
             }
-            
+           
             if (sampleIdx === null) continue;
             
             // キーレンジを統合
@@ -743,16 +752,41 @@ class SoundFontSynth {
             // ★重要: sampleBuffersに実際に存在するかチェック
             if (this.sampleBuffers.has(sampleIdx)) {
               const sampleInfo = this.sampleBuffers.get(sampleIdx);
+ if (rootKey === null) {
+  rootKey = sampleInfo.originalPitch;
+}
               if (presetIdx < 10 || program === 0) {
-                console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi}`);
+                console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi} ${sampleInfo?.zure}`);
               }
-              if(finalLo < 60){
-              for (let note = 0; note <= 172; note++) {
-                
-                samplesForProgram[note] = sampleIdx;
-                
-              }
-              }
+              
+             for (let note = finalLo; note <= finalHi; note++) {
+const safeRootKey =
+  Number.isFinite(rootKey)
+    ? rootKey
+    : Number.isFinite(sampleInfo.originalPitch)
+      ? sampleInfo.originalPitch
+      : 60; // ← 最終フォールバック（C4）
+
+  const newEntry = {
+    sampleIdx,
+    rootKey:safeRootKey,
+    coarseTune,
+    fineTune
+  };
+
+  const prev = samplesForProgram[note];
+  if (!prev) {
+    samplesForProgram[note] = newEntry;
+  } else {
+    const prevDiff = Math.abs(prev.rootKey - note);
+    const newDiff  = Math.abs(rootKey - note);
+    if (newDiff < prevDiff) {
+      samplesForProgram[note] = newEntry;
+    }
+  }
+}
+
+              
 
             } else {
               // サンプルが無効な場合はスキップ
@@ -798,17 +832,20 @@ this.programToSamples.set(key, samplesForProgram);
    
     
     if (samplesForProgram && samplesForProgram[note] !== undefined) {
-      const sampleIdx = samplesForProgram[note];
-      const sample = this.sampleBuffers.get(sampleIdx);
-      
+      const sampleIdx = samplesForProgram[note].sampleIdx;
+      const sampleInfo = this.sampleBuffers.get(sampleIdx);
+      const entry = samplesForProgram[note];
       // デバッグ: 最初の数回のノートオンをログ
       if (this.debugCount === undefined) this.debugCount = 0;
       if (this.debugCount < 10) {
-        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sample?.name}, pitch=${sample?.originalPitch}`);
+        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sampleInfo?.name}, pitch=${sampleInfo?.originalPitch}`);
         this.debugCount++;
       }
-      
-      return sample;
+    
+      return{
+  sampleInfo,
+        entry
+};
     }
     
     // フォールバック: 最も近いピッチのサンプルを探す
@@ -830,16 +867,22 @@ this.programToSamples.set(key, samplesForProgram);
       this.debugCount++;
     }
     
-    return fallbackSample;
+    return{ sampleInfo: fallbackSample,
+  entry: {
+    rootKey: fallbackSample.originalPitch,
+    coarseTune: 0,
+    fineTune: 0
+  }
+};
   }
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
 const program = this.channelPrograms[channel];
-const sampleInfo = this.findSample(channel, program, note);
-
+const result = this.findSample(channel, program, note);
+if (!result) return;
+    const { sampleInfo, entry } = result;
     
-    if (!sampleInfo) return;
     
     const key = `${channel}-${note}`;
     if (this.activeNotes.has(key)) {
@@ -853,15 +896,19 @@ const sampleInfo = this.findSample(channel, program, note);
     const source = this.audioCtx.createBufferSource();
     
     source.buffer = sampleInfo.buffer;
-    const pitch = sampleInfo.originalPitch + sampleInfo.zure;
-    console.log(sampleInfo.zure);
-    // ピッチ調整（セント単位で正確に）
-    const pitchOffset = note - pitch;
-    
-    console.log(pitchOffset);
-    const playbackRate = Math.pow(2, pitchOffset / 12);
-    console.log(playbackRate);
-    source.playbackRate.value = playbackRate;
+
+const cents = sampleInfo.pitchCorrection || 0;
+ const pitch =
+  note
+  - entry.rootKey
+  + entry.coarseTune
+  + entry.fineTune / 100
+  + (sampleInfo.pitchCorrection || 0) / 100;
+console.log("rootKey:"+entry.rootKey,"coarseTune:"+entry.coarseTune,"fineTune:"+entry.fineTune,"pitchCorrection:"+sampleInfo.pitchCorrection);
+source.playbackRate.value = Math.pow(2, pitch / 12);
+
+
+
     
     // ループ設定（有効なループポイントがある場合のみ）
     if (sampleInfo.loopStart > 0 && sampleInfo.loopEnd > sampleInfo.loopStart) {
