@@ -720,7 +720,9 @@ let fineTune = 0;
  let rootKey = null;
             const iGenStart = iBag.genNdx;
             const iGenEnd = this.sf.instrumentBags[iBagIdx + 1]?.genNdx || this.sf.instrumentGens.length;
-            
+            function s16(v) {
+  return (v & 0x8000) ? v - 0x10000 : v;
+}
             let iKeyRange = { lo: 0, hi: 127 };
             let sampleIdx = null;
             let attenuation = 0;
@@ -730,8 +732,8 @@ let fineTune = 0;
 if (iGen.oper === 58) { // overridingRootKey
     rootKey = iGen.amount;
   }
-if (iGen.oper === 51) coarseTune += iGen.amount; // semitone
-if (iGen.oper === 52) fineTune   += iGen.amount; // cent
+if (iGen.oper === 51) coarseTune += s16(iGen.amount); // semitone
+if (iGen.oper === 52) fineTune   += s16(iGen.amount); // cent
                if (iGen.oper === 48) {
          attenuation += iGen.amount; // 0.1dB単位
 }
