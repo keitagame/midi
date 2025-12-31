@@ -4,8 +4,14 @@
 <meta charset="utf-8" />
 <title>MIDI Player with SoundFont (.sf2)</title>
 <style>
-  body { font-family: system-ui, sans-serif; padding: 20px; background:black; color:white;}
-  .log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
+    @font-face {
+  font-family: "Renner";
+  src: url("./Renner.ttf") format("truetype");
+  font-display: swap;
+ 
+}
+  body {  font-family: "Renner", sans-serif; padding: 20px; background:black; color:white;}
+  .log { white-space: pre-wrap;  background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
   button { margin-right: 8px; padding: 8px 16px; }
   .file-input { margin: 10px 0; }
   .status { color: #4a4; margin: 10px 0; }
@@ -13,6 +19,26 @@
 </head>
 <body>
   <h1>MIDI Player with SoundFont (.sf2)</h1>
+  <div class="file-input">
+  <label>MIDI Input: </label>
+  <select id="midiInputSelect" disabled>
+    <option value="">-- Select MIDI Input --</option>
+  </select>
+  <span id="midiInputStatus" class="status"></span>
+</div>
+
+<div class="file-input">
+  <label>Input Mode: </label>
+  <label style="margin-right:15px;">
+    <input type="radio" name="inputMode" value="file" checked />
+    MIDI File
+  </label>
+  <label>
+    <input type="radio" name="inputMode" value="realtime" />
+    Realtime MIDI
+  </label>
+</div>
+
   <!-- 既存のMIDI Fileの入力の下に追加 -->
 <div class="file-input">
   <label>MIDI Output: </label>
@@ -47,8 +73,8 @@
     <input type="file" id="midiFile" accept=".mid,.midi" />
   </div>
   
-  <button id="playBtn" disabled>Play</button>
-  <button id="stopBtn" disabled>Stop</button>
+  <button id="playBtn">Play</button>
+  <button id="stopBtn">Stop</button>
   
   <div id="visualizer" style="display:grid; grid-template-columns:repeat(4,1fr); gap:0px; margin:20px 0;">
   </div>
@@ -62,13 +88,33 @@ let selectedMidiOutput = null;
   // att は 0.1dB 単位
   return Math.pow(10, -(att / 10) / 20);
 }
+// ===== MIDI INPUT =====
+let selectedMidiInput = null;
 async function initMidiAccess() {
   try {
     midiAccess = await navigator.requestMIDIAccess();
     const midiOutputSelect = document.getElementById('midiOutputSelect');
     const midiOutputStatus = document.getElementById('midiOutputStatus');
     const useMidiOutput = document.getElementById('useMidiOutput');
-    
+    const midiInputSelect = document.getElementById('midiInputSelect');
+const midiInputStatus = document.getElementById('midiInputStatus');
+
+    const inputs = Array.from(midiAccess.inputs.values());
+
+if (inputs.length === 0) {
+  midiInputStatus.textContent = '✗ No MIDI input';
+  midiInputStatus.style.color = '#a44';
+} else {
+  inputs.forEach(input => {
+    const opt = document.createElement('option');
+    opt.value = input.id;
+    opt.textContent = input.name;
+    midiInputSelect.appendChild(opt);
+  });
+  midiInputSelect.disabled = false;
+  midiInputStatus.textContent = `✓ ${inputs.length} input(s)`;
+  midiInputStatus.style.color = '#4a4';
+}
     // MIDI出力デバイスのリストを作成
     const outputs = Array.from(midiAccess.outputs.values());
     
@@ -153,6 +199,51 @@ function sendAllNotesOff() {
     sendMidiMessage(status, 123, 0);
   }
 }
+
+
+
+
+midiInputSelect.addEventListener('change', e => {
+  if (selectedMidiInput) {
+    selectedMidiInput.onmidimessage = null;
+  }
+  selectedMidiInput = midiAccess.inputs.get(e.target.value);
+  if (selectedMidiInput) {
+    selectedMidiInput.onmidimessage = handleRealtimeMidi;
+    log(`MIDI Input selected: ${selectedMidiInput.name}`);
+  }
+});
+function handleRealtimeMidi(e) {
+  if (!synth) return;
+
+  const [status, d1, d2] = e.data;
+  const type = status & 0xF0;
+  const ch = status & 0x0F;
+  const now = audioCtx.currentTime;
+
+  switch (type) {
+    case 0x90: // Note On
+      if (d2 === 0) {
+        synth.noteOff(ch, d1, now);
+      } else {
+        synth.noteOn(ch, d1, d2, now);
+      }
+      break;
+
+    case 0x80: // Note Off
+      synth.noteOff(ch, d1, now);
+      break;
+
+    case 0xB0: // CC
+      // 必要なら拡張（ModWheel, Volumeなど）
+      break;
+
+    case 0xC0: // Program Change
+      synth.programChange(ch, d1);
+      break;
+  }
+}
+
 let rootKey = null;
 // ============ SoundFont Parser ============
 class SoundFontParser {
@@ -1326,7 +1417,7 @@ sf2Input.addEventListener('change', async (e) => {
     sf2Status.style.color = '#4a4';
     log(`SoundFont loaded: ${soundFont.presets.length} presets, ${soundFont.samples.length} samples`);
     
-    if (parsed) playBtn.disabled = false;
+    
   } catch (err) {
     sf2Status.textContent = '✗ Error';
     sf2Status.style.color = '#a44';
@@ -1344,24 +1435,37 @@ midiInput.addEventListener('change', async (e) => {
     log(`Loaded MIDI: ${file.name}`);
     log(`Format: ${parsed.header.formatType}, Tracks: ${parsed.header.trackCount}, Division: ${parsed.header.division}`);
     
-    if (soundFont) playBtn.disabled = false;
+    
   } catch (err) {
     log(`Error loading MIDI: ${err.message}`);
   }
 });
 
 playBtn.addEventListener('click', () => {
-  if (!parsed || !soundFont) return;
-  
+  //if (!parsed || !soundFont);
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
   const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
   const useSoundfont = outputMode === 'soundfont' || outputMode === 'both';
   const useMidiOutput = outputMode === 'midi' || outputMode === 'both';
-  initVisualizer();
-  synth = new SoundFontSynth(audioCtx, soundFont);
+  //initVisualizer();
+const inputMode =
+  document.querySelector('input[name="inputMode"]:checked')?.value || 'file';
+
+
+synth = new SoundFontSynth(audioCtx, soundFont);
+
   
+  
+if (inputMode === 'realtime') {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  //initVisualizer();
+  
+  //animate(synth);
+  log('Realtime MIDI mode started');
+  return;
+}
 
 
   const { division } = parsed.header;
@@ -1378,7 +1482,7 @@ playBtn.addEventListener('click', () => {
   
   function step() {
     if (!isPlaying) return;
-    const useMidiOutput = document.getElementById('useMidiOutput');
+   
   const useMidiOutputChecked = useMidiOutput ? useMidiOutput.checked : false;
     const lookAhead = 0.15; // ルックアヘッドを150msに延長
     const now = performance.now();
@@ -1449,15 +1553,13 @@ playBtn.addEventListener('click', () => {
       setTimeout(step, 10);
     } else if (isPlaying) {
       log("Finished.");
-      playBtn.disabled = false;
-      stopBtn.disabled = true;
+      
     }
   }
   
-  playBtn.disabled = true;
-  stopBtn.disabled = false;
+  
   log("Playing with SoundFont...");
-  animate(synth);
+  //animate(synth);
   step();
 });
 
@@ -1480,8 +1582,7 @@ stopBtn.addEventListener('click', () => {
     animationId = null;
   }
   
-  playBtn.disabled = false;
-  stopBtn.disabled = true;
+  
   log("Stopped.");
 });
 window.addEventListener('DOMContentLoaded', initMidiAccess);
