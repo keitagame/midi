@@ -13,7 +13,29 @@
 </head>
 <body>
   <h1>MIDI Player with SoundFont (.sf2)</h1>
-  
+  <!-- 既存のMIDI Fileの入力の下に追加 -->
+<div class="file-input">
+  <label>MIDI Output: </label>
+  <select id="midiOutputSelect" disabled>
+    <option value="">-- Select MIDI Device --</option>
+  </select>
+  <span id="midiOutputStatus" class="status"></span>
+</div>
+<div class="file-input">
+  <label>Output Mode: </label>
+  <label style="margin-right: 15px;">
+    <input type="radio" name="outputMode" value="soundfont" checked />
+    SoundFont
+  </label>
+  <label style="margin-right: 15px;">
+    <input type="radio" name="outputMode" value="midi" />
+    MIDI Device
+  </label>
+  <label>
+    <input type="radio" name="outputMode" value="both" />
+    Both
+  </label>
+</div>
   <div class="file-input">
     <label>SoundFont (.sf2): </label>
     <input type="file" id="sf2File" accept=".sf2" />
@@ -34,11 +56,104 @@
   <div class="log" id="log"></div>
 
 <script>
+  let midiAccess = null;
+let selectedMidiOutput = null;
     function attenuationToGain(att) {
   // att は 0.1dB 単位
   return Math.pow(10, -(att / 10) / 20);
 }
+async function initMidiAccess() {
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    const midiOutputSelect = document.getElementById('midiOutputSelect');
+    const midiOutputStatus = document.getElementById('midiOutputStatus');
+    const useMidiOutput = document.getElementById('useMidiOutput');
+    
+    // MIDI出力デバイスのリストを作成
+    const outputs = Array.from(midiAccess.outputs.values());
+    
+    if (outputs.length === 0) {
+      midiOutputStatus.textContent = '✗ No MIDI devices found';
+      midiOutputStatus.style.color = '#a44';
+      log('No MIDI output devices found');
+      return;
+    }
+    
+    // セレクトボックスにデバイスを追加
+    outputs.forEach(output => {
+      const option = document.createElement('option');
+      option.value = output.id;
+      option.textContent = output.name;
+      midiOutputSelect.appendChild(option);
+    });
+    
+    midiOutputSelect.disabled = false;
+    midiOutputStatus.textContent = `✓ ${outputs.length} device(s) available`;
+    midiOutputStatus.style.color = '#4a4';
+    log(`Found ${outputs.length} MIDI output device(s)`);
+    
+    // デバイス選択時のイベントハンドラ
+    midiOutputSelect.addEventListener('change', (e) => {
+      const outputId = e.target.value;
+      if (outputId) {
+        selectedMidiOutput = midiAccess.outputs.get(outputId);
+        log(`Selected MIDI output: ${selectedMidiOutput.name}`);
+      } else {
+        selectedMidiOutput = null;
+      }
+    });
+    
+  } catch (err) {
+    log(`MIDI Access Error: ${err.message}`);
+    document.getElementById('midiOutputStatus').textContent = '✗ MIDI not supported';
+    document.getElementById('midiOutputStatus').style.color = '#a44';
+  }
+}
 
+// MIDI出力関数
+function sendMidiMessage(status, data1, data2) {
+  if (!selectedMidiOutput) return;
+  
+  try {
+    if (data2 !== undefined && data2 !== null) {
+      selectedMidiOutput.send([status, data1, data2]);
+    } else {
+      selectedMidiOutput.send([status, data1]);
+    }
+  } catch (err) {
+    console.error('MIDI send error:', err);
+  }
+}
+
+// NoteOn MIDI送信
+function sendMidiNoteOn(channel, note, velocity) {
+  const status = 0x90 | (channel & 0x0F);
+  sendMidiMessage(status, note, velocity);
+}
+
+// NoteOff MIDI送信
+function sendMidiNoteOff(channel, note) {
+  const status = 0x80 | (channel & 0x0F);
+  sendMidiMessage(status, note, 0);
+}
+
+// Program Change MIDI送信
+function sendMidiProgramChange(channel, program) {
+  const status = 0xC0 | (channel & 0x0F);
+  sendMidiMessage(status, program);
+}
+
+// All Notes Off送信（停止時用）
+function sendAllNotesOff() {
+  if (!selectedMidiOutput) return;
+  
+  for (let ch = 0; ch < 16; ch++) {
+    // Control Change 123 (All Notes Off)
+    const status = 0xB0 | ch;
+    sendMidiMessage(status, 123, 0);
+  }
+}
+let rootKey = null;
 // ============ SoundFont Parser ============
 class SoundFontParser {
   constructor(arrayBuffer) {
@@ -613,6 +728,7 @@ class SoundFontSynth {
           loopStart,
           loopEnd,
           originalPitch: sample.originalPitch || 60,
+            pitchCorrection: sample.pitchCorrection ?? 0,
           sampleRate,
           name: sample.name,
           zure: sample.zure,
@@ -705,24 +821,34 @@ class SoundFontSynth {
         
         // インストゥルメントからサンプルを取得
         if (instrumentIdx < this.sf.instruments.length) {
+           
           const inst = this.sf.instruments[instrumentIdx];
           const instBagStart = inst.instBagNdx;
           const nextInst = this.sf.instruments[instrumentIdx + 1];
           const instBagEnd = nextInst ? nextInst.instBagNdx : this.sf.instrumentBags.length;
-          
+         
           for (let iBagIdx = instBagStart; iBagIdx < instBagEnd; iBagIdx++) {
             const iBag = this.sf.instrumentBags[iBagIdx];
             if (!iBag) continue;
-            
+             let coarseTune = 0;
+let fineTune = 0;
+ let rootKey = null;
             const iGenStart = iBag.genNdx;
             const iGenEnd = this.sf.instrumentBags[iBagIdx + 1]?.genNdx || this.sf.instrumentGens.length;
-            
+            function s16(v) {
+  return (v & 0x8000) ? v - 0x10000 : v;
+}
             let iKeyRange = { lo: 0, hi: 127 };
             let sampleIdx = null;
             let attenuation = 0;
             for (let iGenIdx = iGenStart; iGenIdx < iGenEnd; iGenIdx++) {
               const iGen = this.sf.instrumentGens[iGenIdx];
               if (!iGen) continue;
+if (iGen.oper === 58) { // overridingRootKey
+    rootKey = iGen.amount;
+  }
+if (iGen.oper === 51) coarseTune += s16(iGen.amount); // semitone
+if (iGen.oper === 52) fineTune   += s16(iGen.amount); // cent
                if (iGen.oper === 48) {
          attenuation += iGen.amount; // 0.1dB単位
 }
@@ -733,7 +859,7 @@ class SoundFontSynth {
                 iKeyRange.hi = (iGen.amount >> 8) & 0xFF;
               }
             }
-            
+           
             if (sampleIdx === null) continue;
             
             // キーレンジを統合
@@ -743,16 +869,41 @@ class SoundFontSynth {
             // ★重要: sampleBuffersに実際に存在するかチェック
             if (this.sampleBuffers.has(sampleIdx)) {
               const sampleInfo = this.sampleBuffers.get(sampleIdx);
+ if (rootKey === null) {
+  rootKey = sampleInfo.originalPitch;
+}
               if (presetIdx < 10 || program === 0) {
-                console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi}`);
+                console.log(`      Sample ${sampleIdx} (${sampleInfo?.name}) -> keys ${finalLo}-${finalHi} ${sampleInfo?.zure}`);
               }
-              if(finalLo < 60){
-              for (let note = 0; note <= 172; note++) {
-                
-                samplesForProgram[note] = sampleIdx;
-                
-              }
-              }
+              
+             for (let note = finalLo; note <= finalHi; note++) {
+const safeRootKey =
+  Number.isFinite(rootKey)
+    ? rootKey
+    : Number.isFinite(sampleInfo.originalPitch)
+      ? sampleInfo.originalPitch
+      : 60; // ← 最終フォールバック（C4）
+
+  const newEntry = {
+    sampleIdx,
+    rootKey:safeRootKey,
+    coarseTune,
+    fineTune
+  };
+
+  const prev = samplesForProgram[note];
+  if (!prev) {
+    samplesForProgram[note] = newEntry;
+  } else {
+    const prevDiff = Math.abs(prev.rootKey - note);
+    const newDiff  = Math.abs(rootKey - note);
+    if (newDiff < prevDiff) {
+      samplesForProgram[note] = newEntry;
+    }
+  }
+}
+
+              
 
             } else {
               // サンプルが無効な場合はスキップ
@@ -767,7 +918,9 @@ class SoundFontSynth {
       // マッピングを保存
       const mappedNotes = samplesForProgram.filter(s => s !== undefined).length;
       if (mappedNotes > 0) {
-        this.programToSamples.set(program, samplesForProgram);
+       const key = `${bank}:${program}`;
+this.programToSamples.set(key, samplesForProgram);
+
         if (presetIdx < 10 || program === 0) {
           console.log(`  -> Mapped ${mappedNotes}/128 notes to samples`);
         }
@@ -782,7 +935,10 @@ class SoundFontSynth {
     console.log(`Programs with samples:`, Array.from(this.programToSamples.keys()).slice(0, 20));
   }
 
-  findSample(program, note) {
+  findSample(channel, program, note) {
+  const bank = (channel === 9) ? 128 : 0;
+  const key = `${bank}:${program}`;
+  const samplesForProgram = this.programToSamples.get(key);
     // サンプルが無い場合
     if (this.sampleBuffers.size === 0) {
       console.warn('No samples available');
@@ -790,20 +946,23 @@ class SoundFontSynth {
     }
     
     // プログラム番号のマッピングを使用
-    const samplesForProgram = this.programToSamples.get(program);
+   
     
     if (samplesForProgram && samplesForProgram[note] !== undefined) {
-      const sampleIdx = samplesForProgram[note];
-      const sample = this.sampleBuffers.get(sampleIdx);
-      
+      const sampleIdx = samplesForProgram[note].sampleIdx;
+      const sampleInfo = this.sampleBuffers.get(sampleIdx);
+      const entry = samplesForProgram[note];
       // デバッグ: 最初の数回のノートオンをログ
       if (this.debugCount === undefined) this.debugCount = 0;
       if (this.debugCount < 10) {
-        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sample?.name}, pitch=${sample?.originalPitch}`);
+        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sampleInfo?.name}, pitch=${sampleInfo?.originalPitch}`);
         this.debugCount++;
       }
-      
-      return sample;
+    
+      return{
+  sampleInfo,
+        entry
+};
     }
     
     // フォールバック: 最も近いピッチのサンプルを探す
@@ -825,14 +984,22 @@ class SoundFontSynth {
       this.debugCount++;
     }
     
-    return fallbackSample;
+    return{ sampleInfo: fallbackSample,
+  entry: {
+    rootKey: fallbackSample.originalPitch,
+    coarseTune: 0,
+    fineTune: 0
+  }
+};
   }
 
   noteOn(channel, note, velocity, when) {
-    const program = this.channelPrograms[channel];
-    const sampleInfo = this.findSample(program, note);
+   // noteOn 側
+const program = this.channelPrograms[channel];
+const result = this.findSample(channel, program, note);
+if (!result) return;
+    const { sampleInfo, entry } = result;
     
-    if (!sampleInfo) return;
     
     const key = `${channel}-${note}`;
     if (this.activeNotes.has(key)) {
@@ -846,15 +1013,19 @@ class SoundFontSynth {
     const source = this.audioCtx.createBufferSource();
     
     source.buffer = sampleInfo.buffer;
-    const pitch = sampleInfo.originalPitch + sampleInfo.zure;
-    console.log(sampleInfo.zure);
-    // ピッチ調整（セント単位で正確に）
-    const pitchOffset = note - pitch;
-    
-    console.log(pitchOffset);
-    const playbackRate = Math.pow(2, pitchOffset / 12);
-    console.log(playbackRate);
-    source.playbackRate.value = playbackRate;
+
+const cents = sampleInfo.pitchCorrection || 0;
+ const pitch =
+  note
+  - entry.rootKey
+  + entry.coarseTune
+  + entry.fineTune / 100
+  + (sampleInfo.pitchCorrection || 0) / 100;
+console.log("rootKey:"+entry.rootKey,"coarseTune:"+entry.coarseTune,"fineTune:"+entry.fineTune,"pitchCorrection:"+sampleInfo.pitchCorrection);
+source.playbackRate.value = Math.pow(2, pitch / 12);
+
+
+
     
     // ループ設定（有効なループポイントがある場合のみ）
     if (sampleInfo.loopStart > 0 && sampleInfo.loopEnd > sampleInfo.loopStart) {
@@ -910,10 +1081,10 @@ const instGain = attenuationToGain(sampleInfo.attenuation);
   }
 
   programChange(channel, program) {
-    if (program < 0 || program > 127) return;
-    this.channelPrograms[channel] = program;
-    console.log(`Channel ${channel} -> Program ${program}`);
-  }
+  if (channel === 9) return; // ドラムは program 無視
+  this.channelPrograms[channel] = program;
+}
+
 }
 
 // ============ MIDI Parser (元のコードから) ============
@@ -1185,7 +1356,9 @@ playBtn.addEventListener('click', () => {
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
-  
+  const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
+  const useSoundfont = outputMode === 'soundfont' || outputMode === 'both';
+  const useMidiOutput = outputMode === 'midi' || outputMode === 'both';
   initVisualizer();
   synth = new SoundFontSynth(audioCtx, soundFont);
   
@@ -1205,7 +1378,8 @@ playBtn.addEventListener('click', () => {
   
   function step() {
     if (!isPlaying) return;
-    
+    const useMidiOutput = document.getElementById('useMidiOutput');
+  const useMidiOutputChecked = useMidiOutput ? useMidiOutput.checked : false;
     const lookAhead = 0.15; // ルックアヘッドを150msに延長
     const now = performance.now();
     const audioNow = audioCtx.currentTime;
@@ -1222,24 +1396,47 @@ playBtn.addEventListener('click', () => {
         if (ev.type === "midi") {
           const ch = ev.channel;
           switch (ev.evtType) {
-            case 0x9: {
-              const note = ev.p1;
-              const vel = ev.p2 || 0;
-              if (vel > 0) {
-                synth.noteOn(ch, note, vel, scheduleTime);
-              } else {
-                synth.noteOff(ch, note, scheduleTime);
-              }
-              break;
-            }
-            case 0x8: {
-              synth.noteOff(ch, ev.p1, scheduleTime);
-              break;
-            }
-            case 0xC: {
-              synth.programChange(ch, ev.p1);
-              break;
-            }
+           case 0x9: {
+      const note = ev.p1;
+      const vel = ev.p2 || 0;
+      if (vel > 0) {
+        // SoundFont再生
+        if (useSoundfont) {
+          synth.noteOn(ch, note, vel, scheduleTime);
+        }
+        
+        // MIDI出力
+        if (useMidiOutput && selectedMidiOutput) {
+          setTimeout(() => sendMidiNoteOn(ch, note, vel), deltaMs);
+        }
+      } else {
+        if (useSoundfont) {
+          synth.noteOff(ch, note, scheduleTime);
+        }
+        if (useMidiOutput && selectedMidiOutput) {
+          setTimeout(() => sendMidiNoteOff(ch, note), deltaMs);
+        }
+      }
+      break;
+    }
+    case 0x8: {
+      if (useSoundfont) {
+        synth.noteOff(ch, ev.p1, scheduleTime);
+      }
+      if (useMidiOutput && selectedMidiOutput) {
+        setTimeout(() => sendMidiNoteOff(ch, ev.p1), deltaMs);
+      }
+      break;
+    }
+    case 0xC: {
+      if (useSoundfont) {
+        synth.programChange(ch, ev.p1);
+      }
+      if (useMidiOutput && selectedMidiOutput) {
+        setTimeout(() => sendMidiProgramChange(ch, ev.p1), deltaMs);
+      }
+      break;
+    }
           }
         }
         idx++;
@@ -1266,7 +1463,10 @@ playBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => {
   if (stopCallback) stopCallback();
-  
+  const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
+  if ((outputMode === 'midi' || outputMode === 'both') && selectedMidiOutput) {
+    sendAllNotesOff();
+  }
   if (synth) {
     const now = audioCtx.currentTime;
     for (const key of synth.activeNotes.keys()) {
@@ -1284,6 +1484,7 @@ stopBtn.addEventListener('click', () => {
   stopBtn.disabled = true;
   log("Stopped.");
 });
+window.addEventListener('DOMContentLoaded', initMidiAccess);
 </script>
 </body>
 </html>
