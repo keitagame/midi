@@ -22,7 +22,7 @@
   
   <div class="file-input">
     <label>MIDI File (.mid): </label>
-    <input type="file" id="midiFile" accept=".mid,.midi" />
+    <input type="file" webkitdirectory multiple id="midiFile" accept=".mid,.midi" />
   </div>
   
   <button id="playBtn" disabled>Play</button>
@@ -34,6 +34,9 @@
   <div class="log" id="log"></div>
 
 <script>
+  let midiQueue = [];
+let currentIndex = 0;
+
     function attenuationToGain(att) {
   // att は 0.1dB 単位
   return Math.pow(10, -(att / 10) / 20);
@@ -1220,22 +1223,28 @@ sf2Input.addEventListener('change', async (e) => {
 });
 
 midiInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  try {
-    const buf = await file.arrayBuffer();
-    parsed = parseMidi(buf);
-    log(`Loaded MIDI: ${file.name}`);
-    log(`Format: ${parsed.header.formatType}, Tracks: ${parsed.header.trackCount}, Division: ${parsed.header.division}`);
-    
-    if (soundFont) playBtn.disabled = false;
-  } catch (err) {
-    log(`Error loading MIDI: ${err.message}`);
-  }
+  const files = [...e.target.files]
+    .filter(f => f.name.match(/\.(mid|midi)$/i))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!files.length) return;
+
+  midiQueue = shuffleArray([...files]); // 被らないランダム順
+currentIndex = 0;
+
+log("Random play order:");
+log(midiQueue.map(f => f.name).join('\n'));
+
+
+  log(`Loaded folder: ${files.length} MIDI files`);
+  log(files.map(f => f.name).join('\n'));
+
+  if (soundFont) playBtn.disabled = false;
 });
 
-playBtn.addEventListener('click', () => {
+async function playmidi(file){
+  const buf = await file.arrayBuffer();
+  parsed = parseMidi(buf);
   if (!parsed || !soundFont) return;
   
   if (audioCtx.state === "suspended") {
@@ -1308,6 +1317,7 @@ playBtn.addEventListener('click', () => {
       setTimeout(step, 10);
     } else if (isPlaying) {
       log("Finished.");
+      onSongFinished();
       playBtn.disabled = false;
       stopBtn.disabled = true;
     }
@@ -1318,6 +1328,32 @@ playBtn.addEventListener('click', () => {
   log("Playing with SoundFont...");
   animate(synth);
   step();
+}
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function onSongFinished() {
+  currentIndex++;
+
+  if (currentIndex < midiQueue.length) {
+    playmidi(midiQueue[currentIndex]);
+  } else {
+    log("All songs finished.");
+    playBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+}
+
+playBtn.addEventListener('click', () => {
+  if (!midiQueue.length || !soundFont) return;
+
+  currentIndex = 0;
+  playmidi(midiQueue[currentIndex]);
 });
 
 stopBtn.addEventListener('click', () => {
