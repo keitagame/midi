@@ -4,8 +4,14 @@
 <meta charset="utf-8" />
 <title>MIDI Player with SoundFont (.sf2)</title>
 <style>
-  body { font-family: system-ui, sans-serif; padding: 20px; background:black; color:white;}
-  .log { white-space: pre-wrap; font-family: ui-monospace, monospace; background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
+    @font-face {
+  font-family: "Renner";
+  src: url("./Renner.ttf") format("truetype");
+  font-display: swap;
+ 
+}
+  body {  font-family: "Renner", sans-serif; padding: 20px; background:black; color:white;}
+  .log { white-space: pre-wrap;  background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
   button { margin-right: 8px; padding: 8px 16px; }
   .file-input { margin: 10px 0; }
   .status { color: #4a4; margin: 10px 0; }
@@ -13,7 +19,49 @@
 </head>
 <body>
   <h1>MIDI Player with SoundFont (.sf2)</h1>
-  
+  <div class="file-input">
+  <label>MIDI Input: </label>
+  <select id="midiInputSelect" disabled>
+    <option value="">-- Select MIDI Input --</option>
+  </select>
+  <span id="midiInputStatus" class="status"></span>
+</div>
+
+<div class="file-input">
+  <label>Input Mode: </label>
+  <label style="margin-right:15px;">
+    <input type="radio" name="inputMode" value="file" checked />
+    MIDI File
+  </label>
+  <label>
+    <input type="radio" name="inputMode" value="realtime" />
+    Realtime MIDI
+  </label>
+</div>
+
+  <!-- 既存のMIDI Fileの入力の下に追加 -->
+<div class="file-input">
+  <label>MIDI Output: </label>
+  <select id="midiOutputSelect" disabled>
+    <option value="">-- Select MIDI Device --</option>
+  </select>
+  <span id="midiOutputStatus" class="status"></span>
+</div>
+<div class="file-input">
+  <label>Output Mode: </label>
+  <label style="margin-right: 15px;">
+    <input type="radio" name="outputMode" value="soundfont" checked />
+    SoundFont
+  </label>
+  <label style="margin-right: 15px;">
+    <input type="radio" name="outputMode" value="midi" />
+    MIDI Device
+  </label>
+  <label>
+    <input type="radio" name="outputMode" value="both" />
+    Both
+  </label>
+</div>
   <div class="file-input">
     <label>SoundFont (.sf2): </label>
     <input type="file" id="sf2File" accept=".sf2" />
@@ -25,8 +73,8 @@
     <input type="file" id="midiFile" accept=".mid,.midi" />
   </div>
   
-  <button id="playBtn" disabled>Play</button>
-  <button id="stopBtn" disabled>Stop</button>
+  <button id="playBtn">Play</button>
+  <button id="stopBtn">Stop</button>
   
   <div id="visualizer" style="display:grid; grid-template-columns:repeat(4,1fr); gap:0px; margin:20px 0;">
   </div>
@@ -34,10 +82,168 @@
   <div class="log" id="log"></div>
 
 <script>
+  let midiAccess = null;
+let selectedMidiOutput = null;
     function attenuationToGain(att) {
   // att は 0.1dB 単位
   return Math.pow(10, -(att / 10) / 20);
 }
+// ===== MIDI INPUT =====
+let selectedMidiInput = null;
+async function initMidiAccess() {
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    const midiOutputSelect = document.getElementById('midiOutputSelect');
+    const midiOutputStatus = document.getElementById('midiOutputStatus');
+    const useMidiOutput = document.getElementById('useMidiOutput');
+    const midiInputSelect = document.getElementById('midiInputSelect');
+const midiInputStatus = document.getElementById('midiInputStatus');
+
+    const inputs = Array.from(midiAccess.inputs.values());
+
+if (inputs.length === 0) {
+  midiInputStatus.textContent = '✗ No MIDI input';
+  midiInputStatus.style.color = '#a44';
+} else {
+  inputs.forEach(input => {
+    const opt = document.createElement('option');
+    opt.value = input.id;
+    opt.textContent = input.name;
+    midiInputSelect.appendChild(opt);
+  });
+  midiInputSelect.disabled = false;
+  midiInputStatus.textContent = `✓ ${inputs.length} input(s)`;
+  midiInputStatus.style.color = '#4a4';
+}
+    // MIDI出力デバイスのリストを作成
+    const outputs = Array.from(midiAccess.outputs.values());
+    
+    if (outputs.length === 0) {
+      midiOutputStatus.textContent = '✗ No MIDI devices found';
+      midiOutputStatus.style.color = '#a44';
+      log('No MIDI output devices found');
+      return;
+    }
+    
+    // セレクトボックスにデバイスを追加
+    outputs.forEach(output => {
+      const option = document.createElement('option');
+      option.value = output.id;
+      option.textContent = output.name;
+      midiOutputSelect.appendChild(option);
+    });
+    
+    midiOutputSelect.disabled = false;
+    midiOutputStatus.textContent = `✓ ${outputs.length} device(s) available`;
+    midiOutputStatus.style.color = '#4a4';
+    log(`Found ${outputs.length} MIDI output device(s)`);
+    
+    // デバイス選択時のイベントハンドラ
+    midiOutputSelect.addEventListener('change', (e) => {
+      const outputId = e.target.value;
+      if (outputId) {
+        selectedMidiOutput = midiAccess.outputs.get(outputId);
+        log(`Selected MIDI output: ${selectedMidiOutput.name}`);
+      } else {
+        selectedMidiOutput = null;
+      }
+    });
+    
+  } catch (err) {
+    log(`MIDI Access Error: ${err.message}`);
+    document.getElementById('midiOutputStatus').textContent = '✗ MIDI not supported';
+    document.getElementById('midiOutputStatus').style.color = '#a44';
+  }
+}
+
+// MIDI出力関数
+function sendMidiMessage(status, data1, data2) {
+  if (!selectedMidiOutput) return;
+  
+  try {
+    if (data2 !== undefined && data2 !== null) {
+      selectedMidiOutput.send([status, data1, data2]);
+    } else {
+      selectedMidiOutput.send([status, data1]);
+    }
+  } catch (err) {
+    console.error('MIDI send error:', err);
+  }
+}
+
+// NoteOn MIDI送信
+function sendMidiNoteOn(channel, note, velocity) {
+  const status = 0x90 | (channel & 0x0F);
+  sendMidiMessage(status, note, velocity);
+}
+
+// NoteOff MIDI送信
+function sendMidiNoteOff(channel, note) {
+  const status = 0x80 | (channel & 0x0F);
+  sendMidiMessage(status, note, 0);
+}
+
+// Program Change MIDI送信
+function sendMidiProgramChange(channel, program) {
+  const status = 0xC0 | (channel & 0x0F);
+  sendMidiMessage(status, program);
+}
+
+// All Notes Off送信（停止時用）
+function sendAllNotesOff() {
+  if (!selectedMidiOutput) return;
+  
+  for (let ch = 0; ch < 16; ch++) {
+    // Control Change 123 (All Notes Off)
+    const status = 0xB0 | ch;
+    sendMidiMessage(status, 123, 0);
+  }
+}
+
+
+
+
+midiInputSelect.addEventListener('change', e => {
+  if (selectedMidiInput) {
+    selectedMidiInput.onmidimessage = null;
+  }
+  selectedMidiInput = midiAccess.inputs.get(e.target.value);
+  if (selectedMidiInput) {
+    selectedMidiInput.onmidimessage = handleRealtimeMidi;
+    log(`MIDI Input selected: ${selectedMidiInput.name}`);
+  }
+});
+function handleRealtimeMidi(e) {
+  if (!synth) return;
+
+  const [status, d1, d2] = e.data;
+  const type = status & 0xF0;
+  const ch = status & 0x0F;
+  const now = audioCtx.currentTime;
+
+  switch (type) {
+    case 0x90: // Note On
+      if (d2 === 0) {
+        synth.noteOff(ch, d1, now);
+      } else {
+        synth.noteOn(ch, d1, d2, now);
+      }
+      break;
+
+    case 0x80: // Note Off
+      synth.noteOff(ch, d1, now);
+      break;
+
+    case 0xB0: // CC
+      // 必要なら拡張（ModWheel, Volumeなど）
+      break;
+
+    case 0xC0: // Program Change
+      synth.programChange(ch, d1);
+      break;
+  }
+}
+
 let rootKey = null;
 // ============ SoundFont Parser ============
 class SoundFontParser {
@@ -506,7 +712,8 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.2;
+    this.master.gain.value = 0.2; // 実機相当
+
     this.master.connect(audioCtx.destination);
     
     this.channelAnalysers = [];
@@ -521,9 +728,27 @@ class SoundFontSynth {
       this.channelAnalysers.push(analyser);
       this.channelGains.push(gain);
     }
-    
+   this.channelPrograms      = new Array(16).fill(0);
+this.channelVolume        = new Array(16).fill(100);
+this.channelExpression    = new Array(16).fill(127);
+this.channelPan           = new Array(16).fill(64);
+this.channelPitchBend     = new Array(16).fill(0);
+this.channelBankMSB       = new Array(16).fill(0);
+this.channelBankLSB       = new Array(16).fill(0);
+this.channelRPN           = new Array(16).fill(null);
+this.melodyBoost = new Array(16).fill(1.0);
+
+// デフォルトGM慣例
+this.melodyBoost[0] = 3.8; // Lead
+this.melodyBoost[1] = 3.4;
+this.melodyBoost[2] = 2.4;
+this.melodyBoost[3] = 2.4;
+this.melodyBoost[9] = 1.0; // Drum
+
+this.channelPolyCount = new Array(16).fill(0);
+
     this.activeNotes = new Map();
-    this.channelPrograms = new Array(16).fill(0);
+   
     
     // AudioBufferキャッシュ
     this.sampleBuffers = new Map();
@@ -633,6 +858,32 @@ class SoundFontSynth {
     console.log(`  Invalid: ${invalidSamples}`);
     console.log(`  Total buffers: ${this.sampleBuffers.size}`);
   }
+controlChange(ch, cc, val) {
+  switch (cc) {
+    case 7:   // Volume
+      this.channelVolume[ch] = val;
+      break;
+    case 10:  // Pan
+      this.channelPan[ch] = val;
+      break;
+    case 11:  // Expression
+      this.channelExpression[ch] = val;
+      break;
+    case 64:  // Sustain
+      // GMでは最低限保持でOK（実装簡略）
+      this.sustain = val >= 64;
+      break;
+    case 121: // Reset All Controllers
+      this.channelVolume[ch] = 100;
+      this.channelExpression[ch] = 127;
+      this.channelPan[ch] = 64;
+      this.channelPitchBend[ch] = 0;
+      break;
+    case 123: // All Notes Off
+      this.allNotesOff(ch);
+      break;
+  }
+}
 
   buildProgramMapping() {
     console.log('Building program to sample mapping...');
@@ -844,10 +1095,16 @@ this.programToSamples.set(key, samplesForProgram);
         this.debugCount++;
       }
     
-      return{
+     return {
   sampleInfo,
-        entry
+  entry: {
+    rootKey: entry.rootKey,
+    coarseTune: entry.coarseTune,
+    fineTune: entry.fineTune,
+    attenuation: entry.attenuation ?? 0
+  }
 };
+
     }
     
     // フォールバック: 最も近いピッチのサンプルを探す
@@ -880,12 +1137,14 @@ this.programToSamples.set(key, samplesForProgram);
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
+
 const program = this.channelPrograms[channel];
 const result = this.findSample(channel, program, note);
 if (!result) return;
     const { sampleInfo, entry } = result;
     
-    
+    this.channelPolyCount[channel]++;
+
     const key = `${channel}-${note}`;
     if (this.activeNotes.has(key)) {
       this.noteOff(channel, note, when);
@@ -900,13 +1159,14 @@ if (!result) return;
     source.buffer = sampleInfo.buffer;
 
 const cents = sampleInfo.pitchCorrection || 0;
- const pitch =
+ const bend = this.channelPitchBend[channel] / 8192 * 2; // ±2 semitone
+const pitch =
   note
   - entry.rootKey
   + entry.coarseTune
   + entry.fineTune / 100
-  + (sampleInfo.pitchCorrection || 0) / 100;
-console.log("rootKey:"+entry.rootKey,"coarseTune:"+entry.coarseTune,"fineTune:"+entry.fineTune,"pitchCorrection:"+sampleInfo.pitchCorrection);
+  + bend;
+
 source.playbackRate.value = Math.pow(2, pitch / 12);
 
 
@@ -923,25 +1183,51 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
    
     // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
-    const vel = Math.pow(velocity / 127, 1.2); // ベロシティカーブを適用
-   
-const instGain = attenuationToGain(sampleInfo.attenuation);
+    const vel = velocity / 127;
+const melodyGain = this.melodyBoost[channel] ?? 1.0;
+const poly = Math.max(1, this.channelPolyCount[channel]);
+const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
+
+   const vol = this.channelVolume[channel] / 127;
+const expr = this.channelExpression[channel] / 127;
+const gmGain =
+  vel *
+  (this.channelVolume[channel] / 127) *
+  (this.channelExpression[channel] / 127);
+const attGain = attenuationToGain(entry.attenuation);
+gain.gain.linearRampToValueAtTime(
+  gmGain * attGain * melodyGain * polyComp,
+  scheduleTime + 0.003
+);
 
 
-    console.log(vel);
-    gain.gain.setValueAtTime(0, scheduleTime);
-    gain.gain.linearRampToValueAtTime(vel * instGain, scheduleTime + 0.005);
-    
+
+
+const panNode = this.audioCtx.createStereoPanner();
+const pan = (this.channelPan[channel] - 64) / 64;
+panNode.pan.value = pan;
+
+// センター補正
+const panComp = pan === 0 ? 1.414 : 1.0;
+gain.gain.value *= panComp;
+
+panNode.pan.value = (this.channelPan[channel] - 64) / 64;
+
+
+
+
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 8000;
     filter.Q.value = 0.5;
-    
+   
+
     source.connect(filter);
     filter.connect(gain);
     gain.connect(this.channelGains[channel]);
-    
+    gain.connect(panNode);
+panNode.connect(this.channelGains[channel]);
     source.start(scheduleTime);
     
     this.activeNotes.set(key, { source, gain, startTime: scheduleTime });
@@ -953,7 +1239,9 @@ const instGain = attenuationToGain(sampleInfo.attenuation);
     if (!info) return;
     
     const { source, gain } = info;
-    
+    this.channelPolyCount[channel] =
+  Math.max(0, this.channelPolyCount[channel] - 1);
+
     // 時刻が負の値にならないように保証
     const now = this.audioCtx.currentTime;
     const scheduleTime = Math.max(when, now);
@@ -966,9 +1254,19 @@ const instGain = attenuationToGain(sampleInfo.attenuation);
   }
 
   programChange(channel, program) {
-  if (channel === 9) return; // ドラムは program 無視
-  this.channelPrograms[channel] = program;
+  if (channel === 9) return;
+  this.channelPrograms[channel] = program & 0x7F;
 }
+resetGM() {
+  for (let ch = 0; ch < 16; ch++) {
+    this.channelPrograms[ch] = 0;
+    this.channelVolume[ch] = 100;
+    this.channelExpression[ch] = 127;
+    this.channelPan[ch] = 64;
+    this.channelPitchBend[ch] = 0;
+  }
+}
+
 
 }
 
@@ -1211,7 +1509,7 @@ sf2Input.addEventListener('change', async (e) => {
     sf2Status.style.color = '#4a4';
     log(`SoundFont loaded: ${soundFont.presets.length} presets, ${soundFont.samples.length} samples`);
     
-    if (parsed) playBtn.disabled = false;
+    
   } catch (err) {
     sf2Status.textContent = '✗ Error';
     sf2Status.style.color = '#a44';
@@ -1229,22 +1527,37 @@ midiInput.addEventListener('change', async (e) => {
     log(`Loaded MIDI: ${file.name}`);
     log(`Format: ${parsed.header.formatType}, Tracks: ${parsed.header.trackCount}, Division: ${parsed.header.division}`);
     
-    if (soundFont) playBtn.disabled = false;
+    
   } catch (err) {
     log(`Error loading MIDI: ${err.message}`);
   }
 });
 
 playBtn.addEventListener('click', () => {
-  if (!parsed || !soundFont) return;
-  
+  //if (!parsed || !soundFont);
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
+  const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
+  const useSoundfont = outputMode === 'soundfont' || outputMode === 'both';
+  const useMidiOutput = outputMode === 'midi' || outputMode === 'both';
+  //initVisualizer();
+const inputMode =
+  document.querySelector('input[name="inputMode"]:checked')?.value || 'file';
+
+
+synth = new SoundFontSynth(audioCtx, soundFont);
+
   
-  initVisualizer();
-  synth = new SoundFontSynth(audioCtx, soundFont);
   
+if (inputMode === 'realtime') {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  //initVisualizer();
+  
+  //animate(synth);
+  log('Realtime MIDI mode started');
+  return;
+}
 
 
   const { division } = parsed.header;
@@ -1261,7 +1574,8 @@ playBtn.addEventListener('click', () => {
   
   function step() {
     if (!isPlaying) return;
-    
+   
+  const useMidiOutputChecked = useMidiOutput ? useMidiOutput.checked : false;
     const lookAhead = 0.15; // ルックアヘッドを150msに延長
     const now = performance.now();
     const audioNow = audioCtx.currentTime;
@@ -1274,28 +1588,71 @@ playBtn.addEventListener('click', () => {
       if (deltaMs <= lookAhead * 1000) {
         // スケジュール時刻を計算（最小でも現在時刻+10msを保証）
         const scheduleTime = Math.max(audioNow + deltaMs / 1000, audioNow + 0.01);
-        
+        if (
+  ev.type === "sysex" &&
+  ev.data[0] === 0x7E &&
+  ev.data[2] === 0x09 &&
+  ev.data[3] === 0x01
+) {
+  synth.resetGM();
+}
+
         if (ev.type === "midi") {
           const ch = ev.channel;
           switch (ev.evtType) {
-            case 0x9: {
-              const note = ev.p1;
-              const vel = ev.p2 || 0;
-              if (vel > 0) {
-                synth.noteOn(ch, note, vel, scheduleTime);
-              } else {
-                synth.noteOff(ch, note, scheduleTime);
-              }
-              break;
-            }
-            case 0x8: {
-              synth.noteOff(ch, ev.p1, scheduleTime);
-              break;
-            }
-            case 0xC: {
-              synth.programChange(ch, ev.p1);
-              break;
-            }
+           case 0x9: {
+      const note = ev.p1;
+      const vel = ev.p2 || 0;
+      if (vel > 0) {
+        // SoundFont再生
+        if (useSoundfont) {
+          synth.noteOn(ch, note, vel, scheduleTime);
+        }
+        
+        // MIDI出力
+        if (useMidiOutput && selectedMidiOutput) {
+          setTimeout(() => sendMidiNoteOn(ch, note, vel), deltaMs);
+        }
+      } else {
+        if (useSoundfont) {
+          synth.noteOff(ch, note, scheduleTime);
+        }
+        if (useMidiOutput && selectedMidiOutput) {
+          setTimeout(() => sendMidiNoteOff(ch, note), deltaMs);
+        }
+      }
+      break;
+    }
+    case 0x8: {
+      if (useSoundfont) {
+        synth.noteOff(ch, ev.p1, scheduleTime);
+      }
+      if (useMidiOutput && selectedMidiOutput) {
+        setTimeout(() => sendMidiNoteOff(ch, ev.p1), deltaMs);
+      }
+      break;
+    }
+    case 0xB0: {
+  if (d1 === 0) synth.channelBankMSB[ch] = d2;
+  else if (d1 === 32) synth.channelBankLSB[ch] = d2;
+  else synth.controlChange(ch, d1, d2);
+  break;
+}
+case 0xE0: {
+  const value = (d2 << 7) | d1; // 0–16383
+  synth.channelPitchBend[ch] = value - 8192;
+  break;
+}
+
+    case 0xC: {
+      if (useSoundfont) {
+        synth.programChange(ch, ev.p1);
+      }
+      if (useMidiOutput && selectedMidiOutput) {
+        setTimeout(() => sendMidiProgramChange(ch, ev.p1), deltaMs);
+      }
+      break;
+    }
           }
         }
         idx++;
@@ -1308,21 +1665,22 @@ playBtn.addEventListener('click', () => {
       setTimeout(step, 10);
     } else if (isPlaying) {
       log("Finished.");
-      playBtn.disabled = false;
-      stopBtn.disabled = true;
+      
     }
   }
   
-  playBtn.disabled = true;
-  stopBtn.disabled = false;
+  
   log("Playing with SoundFont...");
-  animate(synth);
+  //animate(synth);
   step();
 });
 
 stopBtn.addEventListener('click', () => {
   if (stopCallback) stopCallback();
-  
+  const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
+  if ((outputMode === 'midi' || outputMode === 'both') && selectedMidiOutput) {
+    sendAllNotesOff();
+  }
   if (synth) {
     const now = audioCtx.currentTime;
     for (const key of synth.activeNotes.keys()) {
@@ -1336,10 +1694,10 @@ stopBtn.addEventListener('click', () => {
     animationId = null;
   }
   
-  playBtn.disabled = false;
-  stopBtn.disabled = true;
+  
   log("Stopped.");
 });
+window.addEventListener('DOMContentLoaded', initMidiAccess);
 </script>
 </body>
 </html>
