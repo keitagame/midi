@@ -82,6 +82,18 @@
   <div class="log" id="log"></div>
 
 <script>
+  const PROGRAM_GAIN_DB = {
+  lead: 15,
+  brass: 10,
+  strings: 6,
+  piano: 8,
+  pad: -8,
+  bass: -8
+};
+function dbToGain(db) {
+  return Math.pow(10, db / 20);
+}
+
   let midiAccess = null;
 let selectedMidiOutput = null;
     function attenuationToGain(att) {
@@ -712,7 +724,7 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.2; // 実機相当
+    this.master.gain.value = 0.1; // 実機相当
 
     this.master.connect(audioCtx.destination);
     
@@ -728,6 +740,8 @@ class SoundFontSynth {
       this.channelAnalysers.push(analyser);
       this.channelGains.push(gain);
     }
+    this.channelProgramGain = new Array(16).fill(1.0);
+
    this.channelPrograms      = new Array(16).fill(0);
 this.channelVolume        = new Array(16).fill(100);
 this.channelExpression    = new Array(16).fill(127);
@@ -739,8 +753,8 @@ this.channelRPN           = new Array(16).fill(null);
 this.melodyBoost = new Array(16).fill(1.0);
 
 // デフォルトGM慣例
-this.melodyBoost[0] = 3.8; // Lead
-this.melodyBoost[1] = 3.4;
+this.melodyBoost[0] = 2.8; // Lead
+this.melodyBoost[1] = 2.4;
 this.melodyBoost[2] = 2.4;
 this.melodyBoost[3] = 2.4;
 this.melodyBoost[9] = 1.0; // Drum
@@ -1187,7 +1201,7 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
 const melodyGain = this.melodyBoost[channel] ?? 1.0;
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
-
+const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
@@ -1196,7 +1210,7 @@ const gmGain =
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
-  gmGain * attGain * melodyGain * polyComp,
+  gmGain * attGain * polyComp *progGain * melodyGain,
   scheduleTime + 0.003
 );
 
@@ -1252,10 +1266,24 @@ panNode.connect(this.channelGains[channel]);
     
     this.activeNotes.delete(key);
   }
+getProgramGain(program) {
+  // SC-88的カテゴリ
+  if (program >= 80 && program <= 87) return dbToGain(4);   // Lead
+  if (program >= 56 && program <= 63) return dbToGain(4);   // Brass
+  if (program >= 40 && program <= 55) return dbToGain(2);   // Strings
+  if (program <= 7)                   return dbToGain(6);   // Piano
+  if (program >= 88 && program <= 95) return dbToGain(-4);  // Pad
+  if (program >= 32 && program <= 39) return dbToGain(-6);  // Bass
+  return 1.0;
+}
 
   programChange(channel, program) {
   if (channel === 9) return;
   this.channelPrograms[channel] = program & 0x7F;
+
+  // ★ここを修正
+  this.channelProgramGain[channel] =
+    this.getProgramGain(program);
 }
 resetGM() {
   for (let ch = 0; ch < 16; ch++) {
