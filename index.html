@@ -1212,7 +1212,7 @@ const gmGain =
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
   gmGain,
-  scheduleTime + 0.001
+  scheduleTime + 0
 );
 
 
@@ -1263,8 +1263,8 @@ panNode.connect(this.channelGains[channel]);
     const scheduleTime = Math.max(when, now);
     
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.02);
-    source.stop(scheduleTime + 0.06);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.0);
+    source.stop(scheduleTime + 0.0);
     
     this.activeNotes.delete(key);
   }
