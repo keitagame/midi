@@ -12,14 +12,71 @@
  
 }
   body {  font-family: "Renner", sans-serif; padding: 20px; background:black; color:white;}
-  .log { white-space: pre-wrap;  background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto; }
+  .log { white-space: pre-wrap;  background: #111; color: #ddd; padding: 10px; border-radius: 6px; max-height: 200px; overflow-y: auto;display:none; }
   button { margin-right: 8px; padding: 8px 16px; }
   .file-input { margin: 10px 0; }
   .status { color: #4a4; margin: 10px 0; }
+
+.keyboard {
+  position: relative;
+  height: 14px;
+  user-select: none;
+  background:#000;
+  border:1px solid #222;
+  overflow:hidden;
+}
+.key {
+  position: absolute;
+  bottom: 0;
+  border: 1px solid #333;
+  box-sizing: border-box;
+}
+
+.key.white {
+  width: 6px;
+  height: 16px;
+  background: #eee;
+  z-index: 1;
+}
+
+.key.black {
+  width: 4px;
+  height: 10px;
+  background: #111;
+  z-index: 2;
+  margin-left: -1px;
+}
+
+.key.active.white {
+  background: rgb(255, 0, 0);
+}
+
+.key.active.black {
+  background: rgb(255, 0, 0);
+}
+#keyboards{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:0px;
+}
+
+.kbRow{
+  display:flex;
+  align-items:center;
+  gap:1px;
+}
+
+.kbLabel{
+  width:50px;
+  font-size:8px;
+  color:#ffffff;
+}
 </style>
 </head>
 <body>
-  <h1>MIDI Player with SoundFont (.sf2)</h1>
+  
+<div style="display:none">
   <div class="file-input">
   <label>MIDI Input: </label>
   <select id="midiInputSelect" disabled>
@@ -63,6 +120,7 @@
     Both
   </label>
 </div>
+</div>
   <div class="file-input">
     <label>SoundFont (.sf2): </label>
     <input type="file" id="sf2File" accept=".sf2" />
@@ -82,7 +140,84 @@
   
   <div class="log" id="log"></div>
 
+<div id="keyboards"></div>
+
+
+
 <script>
+const keyboardsWrap = document.getElementById("keyboards");
+
+// chごとの key要素を保持する
+const keyElemsByCh = Array.from({length:16}, () => new Array(128));
+
+const blackNotes = [1,3,6,8,10];
+function isBlack(note){ return blackNotes.includes(note % 12); }
+
+function buildKeyboardForChannel(ch){
+  const row = document.createElement("div");
+  row.className = "kbRow";
+
+  const label = document.createElement("div");
+  label.className = "kbLabel";
+  label.textContent = `Ch ${ch}`;
+
+  const kb = document.createElement("div");
+  kb.className = "keyboard";
+
+  let x = 0;
+
+  for(let note=0; note<128; note++){
+    const key = document.createElement("div");
+    const black = isBlack(note);
+
+    key.className = `key ${black ? "black":"white"}`;
+    key.dataset.note = note;
+
+    if(!black){
+      key.style.left = `${x}px`;
+      x += 6;
+    }else{
+      key.style.left = `${x - 3.5}px`;
+    }
+
+    kb.appendChild(key);
+    keyElemsByCh[ch][note] = key;
+  }
+
+  kb.style.width = `${x}px`;
+
+  row.appendChild(label);
+  row.appendChild(kb);
+  keyboardsWrap.appendChild(row);
+}
+
+function initKeyboards(){
+  keyboardsWrap.innerHTML = "";
+  for(let ch=0; ch<16; ch++){
+    buildKeyboardForChannel(ch);
+  }
+}
+
+initKeyboards();
+function keyOn(ch, note){
+  const k = keyElemsByCh[ch]?.[note];
+  if(k) k.classList.add("active");
+}
+
+function keyOff(ch, note){
+  const k = keyElemsByCh[ch]?.[note];
+  if(k) k.classList.remove("active");
+}
+
+function clearAllKeys(){
+  for(let ch=0; ch<16; ch++){
+    for(let note=0; note<128; note++){
+      keyOff(ch, note);
+    }
+  }
+}
+
+
   const PROGRAM_GAIN_DB = {
   lead: 15,
   brass: 10,
@@ -1251,6 +1386,7 @@ panNode.connect(this.channelGains[channel]);
   }
 
   noteOff(channel, note, when) {
+
     const key = `${channel}-${note}`;
     const info = this.activeNotes.get(key);
     if (!info) return;
@@ -1300,7 +1436,11 @@ resetGM() {
 
 
 }
-
+function clearKeyboard() {
+  for (let i = 0; i < 128; i++) {
+    keyOff(i);
+  }
+}
 // ============ MIDI Parser (元のコードから) ============
 function parseMidi(arrayBuffer) {
   const data = new DataView(arrayBuffer);
@@ -1639,7 +1779,7 @@ if (inputMode === 'realtime') {
         if (useSoundfont) {
           synth.noteOn(ch, note, vel, scheduleTime);
         }
-        
+        keyOn(ch, note);
         // MIDI出力
         if (useMidiOutput && selectedMidiOutput) {
           setTimeout(() => sendMidiNoteOn(ch, note, vel), deltaMs);
@@ -1647,6 +1787,7 @@ if (inputMode === 'realtime') {
       } else {
         if (useSoundfont) {
           synth.noteOff(ch, note, scheduleTime);
+keyOff(ch, note);
         }
         if (useMidiOutput && selectedMidiOutput) {
           setTimeout(() => sendMidiNoteOff(ch, note), deltaMs);
@@ -1655,8 +1796,10 @@ if (inputMode === 'realtime') {
       break;
     }
     case 0x8: {
+ const note = ev.p1;
       if (useSoundfont) {
         synth.noteOff(ch, ev.p1, scheduleTime);
+keyOff(ch, note);
       }
       if (useMidiOutput && selectedMidiOutput) {
         setTimeout(() => sendMidiNoteOff(ch, ev.p1), deltaMs);
@@ -1708,6 +1851,7 @@ case 0xE0: {
 
 stopBtn.addEventListener('click', () => {
   if (stopCallback) stopCallback();
+clearAllKeys();
   const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
   if ((outputMode === 'midi' || outputMode === 'both') && selectedMidiOutput) {
     sendAllNotesOff();
