@@ -860,7 +860,7 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.1; // 実機相当
+    this.master.gain.value = 0.05; // 実機相当
 
     this.master.connect(audioCtx.destination);
     
@@ -1347,7 +1347,7 @@ const gmGain =
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
-  gmGain,
+  gmGain+progGain+expr+attGain+melodyGain,
   scheduleTime + 0
 );
 
