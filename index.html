@@ -860,7 +860,7 @@ class SoundFontSynth {
     this.audioCtx = audioCtx;
     this.sf = soundFont;
     this.master = audioCtx.createGain();
-    this.master.gain.value = 0.05; // 実機相当
+    this.master.gain.value = 0.15; // 実機相当
 
     this.master.connect(audioCtx.destination);
     
@@ -1347,7 +1347,7 @@ const gmGain =
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
-  gmGain+progGain+expr+attGain+melodyGain,
+  gmGain,
   scheduleTime + 0
 );
 
@@ -1370,7 +1370,7 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 12000;
+    filter.frequency.value = 1200;
 filter.Q.value = 0.2;
 
    
