@@ -324,6 +324,20 @@ function sendMidiNoteOn(channel, note, velocity) {
   const status = 0x90 | (channel & 0x0F);
   sendMidiMessage(status, note, velocity);
 }
+function createReverbIR(audioCtx, seconds = 1.5, decay = 2.0) {
+  const rate = audioCtx.sampleRate;
+  const length = rate * seconds;
+  const impulse = audioCtx.createBuffer(2, length, rate);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+    }
+  }
+  return impulse;
+}
 
 // NoteOff MIDI送信
 function sendMidiNoteOff(channel, note) {
@@ -894,6 +908,14 @@ this.melodyBoost[1] = 2.4;
 this.melodyBoost[2] = 2.4;
 this.melodyBoost[3] = 2.4;
 this.melodyBoost[9] = 1.0; // Drum
+this.reverb = audioCtx.createConvolver();
+this.reverb.buffer = createReverbIR(audioCtx, 1.6, 2.2);
+
+this.reverbGain = audioCtx.createGain();
+this.reverbGain.gain.value = 0.25; // リバーブ量
+
+this.reverb.connect(this.reverbGain);
+this.reverbGain.connect(this.master);
 
 this.channelPolyCount = new Array(16).fill(0);
 
@@ -1374,10 +1396,15 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
 filter.Q.value = 0.2;
 
    
+const send = this.audioCtx.createGain();
+send.gain.value = 0.2; // チャンネルごとに変えてOK
+
+gain.connect(send);
+send.connect(this.reverb);
 
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.channelGains[channel]);
+    //gain.connect(this.channelGains[channel]);
     gain.connect(panNode);
 panNode.connect(this.channelGains[channel]);
     source.start(scheduleTime);
