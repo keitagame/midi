@@ -913,7 +913,28 @@ this.reverb.buffer = createReverbIR(audioCtx, 1.6, 2.2);
 
 this.reverbGain = audioCtx.createGain();
 this.reverbGain.gain.value = 0.25; // リバーブ量
+this.chorusDelay = audioCtx.createDelay(0.03);
+this.chorusDelay.delayTime.value = 0.015;
 
+this.chorusLFO = audioCtx.createOscillator();
+this.chorusLFO.frequency.value = 0.8;
+
+this.chorusLFODepth = audioCtx.createGain();
+this.chorusLFODepth.gain.value = 0.003; // 揺れ幅
+
+this.chorusLFO.connect(this.chorusLFODepth);
+this.chorusLFODepth.connect(this.chorusDelay.delayTime);
+this.chorusLFO.start();
+
+this.chorusGain = audioCtx.createGain();
+this.chorusGain.gain.value = 0.0; // コーラス量(0..1)
+
+this.chorusDelay.connect(this.chorusGain);
+this.chorusGain.connect(this.master);
+
+// ★GM CC用の値（0..127）
+this.channelReverbSend = new Array(16).fill(40); // CC91
+this.channelChorusSend = new Array(16).fill(0);  // CC93
 this.reverb.connect(this.reverbGain);
 this.reverbGain.connect(this.master);
 
@@ -921,7 +942,22 @@ this.channelPolyCount = new Array(16).fill(0);
 
     this.activeNotes = new Map();
    
-    
+    // ★チャンネルごとのSend（固定）
+this.revSendByCh = new Array(16);
+this.choSendByCh = new Array(16);
+
+for (let ch = 0; ch < 16; ch++) {
+  const r = audioCtx.createGain();
+  r.gain.value = 0.0;
+  r.connect(this.reverb);
+  this.revSendByCh[ch] = r;
+
+  const c = audioCtx.createGain();
+  c.gain.value = 0.0;
+  c.connect(this.chorusDelay);
+  this.choSendByCh[ch] = c;
+}
+
     // AudioBufferキャッシュ
     this.sampleBuffers = new Map();
     
@@ -1035,27 +1071,45 @@ controlChange(ch, cc, val) {
     case 7:   // Volume
       this.channelVolume[ch] = val;
       break;
+
     case 10:  // Pan
       this.channelPan[ch] = val;
       break;
+
     case 11:  // Expression
       this.channelExpression[ch] = val;
       break;
+
+    case 91: // Reverb Send
+  this.channelReverbSend[ch] = val;
+  this.revSendByCh[ch].gain.setTargetAtTime(val / 127, this.audioCtx.currentTime, 0.02);
+  break;
+
+case 93: // Chorus Send
+  this.channelChorusSend[ch] = val;
+  this.choSendByCh[ch].gain.setTargetAtTime(val / 127, this.audioCtx.currentTime, 0.02);
+  break;
+
+
     case 64:  // Sustain
-      // GMでは最低限保持でOK（実装簡略）
       this.sustain = val >= 64;
       break;
+
     case 121: // Reset All Controllers
       this.channelVolume[ch] = 100;
       this.channelExpression[ch] = 127;
       this.channelPan[ch] = 64;
       this.channelPitchBend[ch] = 0;
+      this.channelReverbSend[ch] = 40;
+      this.channelChorusSend[ch] = 0;
       break;
+
     case 123: // All Notes Off
       this.allNotesOff(ch);
       break;
   }
 }
+
 
   buildProgramMapping() {
     console.log('Building program to sample mapping...');
@@ -1396,11 +1450,12 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
 filter.Q.value = 0.2;
 
    
-const send = this.audioCtx.createGain();
-send.gain.value = 0.2; // チャンネルごとに変えてOK
 
-gain.connect(send);
-send.connect(this.reverb);
+// ★毎回ノードを作らない（固定Sendへ）
+gain.connect(this.revSendByCh[channel]);
+gain.connect(this.choSendByCh[channel]);
+
+
 
     source.connect(filter);
     filter.connect(gain);
@@ -1833,14 +1888,19 @@ keyOff(ch, note);
       }
       break;
     }
-    case 0xB0: {
-  if (d1 === 0) synth.channelBankMSB[ch] = d2;
-  else if (d1 === 32) synth.channelBankLSB[ch] = d2;
-  else synth.controlChange(ch, d1, d2);
+    case 0xB: { // ← evtType は 0xB（11）です
+  const cc = ev.p1;
+  const val = ev.p2 ?? 0;
+
+  if (cc === 0) synth.channelBankMSB[ch] = val;
+  else if (cc === 32) synth.channelBankLSB[ch] = val;
+  else synth.controlChange(ch, cc, val);
+
   break;
 }
-case 0xE0: {
-  const value = (d2 << 7) | d1; // 0–16383
+
+case 0xE: {
+  const value = (ev.p2 << 7) | ev.p1; // 0–16383
   synth.channelPitchBend[ch] = value - 8192;
   break;
 }
