@@ -1418,11 +1418,12 @@ if (isDrumCh) {
   } else if (compatMode === "GS") {
     // GSでも多くのSF2は128だが、LSB対応もできるようにする
     bank = (msb * 128) + lsb;
+bank = 128;
     if (!this.programToSamples.has(`${bank}:${program}`)) bank = 128;
   } else if (compatMode === "XG") {
     // XGドラムはMSB/LSBで切り替わることがある
     bank = (msb * 128) + lsb;
-
+bank = 128;
     // fallback: よくある128に戻す
     if (!this.programToSamples.has(`${bank}:${program}`)) bank = 128;
   }
@@ -2080,6 +2081,7 @@ keyOff(ch, note);
 
   if (cc === 0) synth.channelBankMSB[ch] = val;
   else if (cc === 32) synth.channelBankLSB[ch] = val;
+
   else synth.controlChange(ch, cc, val);
 
   break;
@@ -2093,6 +2095,7 @@ case 0xE: {
 
     case 0xC: {
       if (useSoundfont) {
+
         synth.programChange(ch, ev.p1);
       }
       if (useMidiOutput && selectedMidiOutput) {
