@@ -2056,8 +2056,9 @@ if (inputMode === 'realtime') {
       } else {
         if (useSoundfont) {
           synth.noteOff(ch, note, scheduleTime);
-keyOff(ch, note);
+
         }
+keyOff(ch, note);
         if (useMidiOutput && selectedMidiOutput) {
           setTimeout(() => sendMidiNoteOff(ch, note), deltaMs);
         }
@@ -2068,8 +2069,9 @@ keyOff(ch, note);
  const note = ev.p1;
       if (useSoundfont) {
         synth.noteOff(ch, ev.p1, scheduleTime);
-keyOff(ch, note);
+
       }
+keyOff(ch, note);
       if (useMidiOutput && selectedMidiOutput) {
         setTimeout(() => sendMidiNoteOff(ch, ev.p1), deltaMs);
       }
