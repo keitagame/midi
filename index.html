@@ -1234,7 +1234,7 @@ case 93: // Chorus Send
       const bank = preset.bank;
       
       // 通常はbank 0を使用
-      if (bank !== 0 && bank !== 128) continue;
+      //if (bank !== 0 && bank !== 128) continue;
       
       // ドラムキット（bank 128）は後で処理
       const isDrum = (bank === 128);
@@ -1403,68 +1403,128 @@ this.programToSamples.set(key, samplesForProgram);
   }
 
   findSample(channel, program, note) {
-  const bank = (channel === 9) ? 128 : 0;
+  // ===== bank決定（GM/GS/XG互換）=====
+  let bank = 0;
+
+  // ドラムチャンネル判定
+  const isDrumCh = (channel === 9);
+
+if (isDrumCh) {
+  const msb = this.channelBankMSB[channel] ?? 0;
+  const lsb = this.channelBankLSB[channel] ?? 0;
+
+  if (compatMode === "GM") {
+    bank = 128;
+  } else if (compatMode === "GS") {
+    // GSでも多くのSF2は128だが、LSB対応もできるようにする
+    bank = (msb * 128) + lsb;
+    if (!this.programToSamples.has(`${bank}:${program}`)) bank = 128;
+  } else if (compatMode === "XG") {
+    // XGドラムはMSB/LSBで切り替わることがある
+    bank = (msb * 128) + lsb;
+
+    // fallback: よくある128に戻す
+    if (!this.programToSamples.has(`${bank}:${program}`)) bank = 128;
+  }
+
+  } else {
+    // メロディ
+    const msb = this.channelBankMSB[channel] ?? 0; // CC0
+    const lsb = this.channelBankLSB[channel] ?? 0; // CC32
+
+    if (compatMode === "GM") {
+      // GMは基本 bank=0 で固定（BankSelect無視）
+      bank = 0;
+    } else if (compatMode === "GS") {
+      // GSは LSB(Variation) を bank番号として使うことが多い
+      // 例: LSB=0=通常, LSB=1=Variation1...
+      bank = lsb;
+    } else if (compatMode === "XG") {
+      // XGは MSBで大分類、LSBでVariation、という構造が多い
+      // SoundFont側が "MSB:LSB" を持ってる場合に対応するため 128*MSB + LSB にする
+      bank = (msb * 128) + lsb;
+    }
+  }
+
+  // bank:program のプリセットを探す
   const key = `${bank}:${program}`;
   const samplesForProgram = this.programToSamples.get(key);
-    // サンプルが無い場合
-    if (this.sampleBuffers.size === 0) {
-      console.warn('No samples available');
-      return null;
-    }
-    
-    // プログラム番号のマッピングを使用
-   
-    
-    if (samplesForProgram && samplesForProgram[note] !== undefined) {
-      const sampleIdx = samplesForProgram[note].sampleIdx;
-      const sampleInfo = this.sampleBuffers.get(sampleIdx);
-      const entry = samplesForProgram[note];
-      // デバッグ: 最初の数回のノートオンをログ
-      if (this.debugCount === undefined) this.debugCount = 0;
-      if (this.debugCount < 10) {
-        console.log(`Program ${program}, Note ${note} -> Sample ${sampleIdx}: ${sampleInfo?.name}, pitch=${sampleInfo?.originalPitch}`);
-        this.debugCount++;
-      }
-    
-     return {
-  sampleInfo,
-  entry: {
-    rootKey: entry.rootKey,
-    coarseTune: entry.coarseTune,
-    fineTune: entry.fineTune,
-    attenuation: entry.attenuation ?? 0
-  }
-};
 
-    }
-    
-    // フォールバック: 最も近いピッチのサンプルを探す
-    let bestIndex = 0;
-    let bestDiff = 999;
-    
-    this.sampleBuffers.forEach((info, idx) => {
-      const diff = Math.abs(info.originalPitch - note);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestIndex = idx;
-      }
-    });
-    
-    const fallbackSample = this.sampleBuffers.get(bestIndex);
-    
+  // サンプルが無い場合
+  if (this.sampleBuffers.size === 0) {
+    console.warn("No samples available");
+    return null;
+  }
+
+  // ★マッピングがあれば使う
+  if (samplesForProgram && samplesForProgram[note] !== undefined) {
+    const sampleIdx = samplesForProgram[note].sampleIdx;
+    const sampleInfo = this.sampleBuffers.get(sampleIdx);
+    const entry = samplesForProgram[note];
+
+    if (this.debugCount === undefined) this.debugCount = 0;
     if (this.debugCount < 10) {
-      console.log(`Program ${program}, Note ${note} -> Fallback Sample ${bestIndex}: ${fallbackSample?.name}, pitch=${fallbackSample?.originalPitch}`);
+      console.log(
+        `Mode=${compatMode} bank=${bank} prog=${program} note=${note} -> sample ${sampleIdx}: ${sampleInfo?.name}`
+      );
       this.debugCount++;
     }
-    
-    return{ sampleInfo: fallbackSample,
-  entry: {
-    rootKey: fallbackSample.originalPitch,
-    coarseTune: 0,
-    fineTune: 0
+
+    return {
+      sampleInfo,
+      entry: {
+        rootKey: entry.rootKey,
+        coarseTune: entry.coarseTune,
+        fineTune: entry.fineTune,
+        attenuation: entry.attenuation ?? 0
+      }
+    };
   }
-};
+
+  // ★フォールバック：GM bank=0 も試す（GS/XGで該当bankが無い場合に鳴るようにする）
+  if (compatMode !== "GM" && !isDrumCh) {
+    const fallbackKey = `0:${program}`;
+    const fallback = this.programToSamples.get(fallbackKey);
+    if (fallback && fallback[note] !== undefined) {
+      const sampleIdx = fallback[note].sampleIdx;
+      const sampleInfo = this.sampleBuffers.get(sampleIdx);
+      const entry = fallback[note];
+
+      return {
+        sampleInfo,
+        entry: {
+          rootKey: entry.rootKey,
+          coarseTune: entry.coarseTune,
+          fineTune: entry.fineTune,
+          attenuation: entry.attenuation ?? 0
+        }
+      };
+    }
   }
+
+  // 最終フォールバック：近いrootKeyのサンプル
+  let bestIndex = 0;
+  let bestDiff = 999;
+
+  this.sampleBuffers.forEach((info, idx) => {
+    const diff = Math.abs(info.originalPitch - note);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIndex = idx;
+    }
+  });
+
+  const fallbackSample = this.sampleBuffers.get(bestIndex);
+  return {
+    sampleInfo: fallbackSample,
+    entry: {
+      rootKey: fallbackSample.originalPitch,
+      coarseTune: 0,
+      fineTune: 0
+    }
+  };
+}
+
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
@@ -1592,6 +1652,18 @@ panNode.connect(this.channelGains[channel]);
     
     this.activeNotes.delete(key);
   }
+allNotesOff(ch) {
+  const now = this.audioCtx.currentTime;
+
+  // activeNotes は "channel-note" のキー
+  for (const key of this.activeNotes.keys()) {
+    const [c, n] = key.split("-").map(Number);
+    if (c === ch) {
+      this.noteOff(c, n, now);
+    }
+  }
+}
+
 getProgramGain(program) {
   // SC-88的カテゴリ
   if (program >= 80 && program <= 87) return dbToGain(4);   // Lead
@@ -1618,8 +1690,17 @@ resetGM() {
     this.channelExpression[ch] = 127;
     this.channelPan[ch] = 64;
     this.channelPitchBend[ch] = 0;
+
+    // ★BankSelectも戻す
+    this.channelBankMSB[ch] = 0;
+    this.channelBankLSB[ch] = 0;
+
+    // ★Reverb/Chorusも戻す（任意）
+    this.channelReverbSend[ch] = 40;
+    this.channelChorusSend[ch] = 0;
   }
 }
+
 
 
 }
