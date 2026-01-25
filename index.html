@@ -179,7 +179,8 @@
 
   <div class="compatHint" id="compatHint">Mode: GM</div>
 </div>
-
+<button id="recBtn">REC</button>
+<button id="recStopBtn" disabled>REC STOP</button>
   <button id="playBtn">Play</button>
   <button id="stopBtn">Stop</button>
   
@@ -1042,7 +1043,7 @@ this.channelReverbSend = new Array(16).fill(40); // CC91
 this.channelChorusSend = new Array(16).fill(0);  // CC93
 this.reverb.connect(this.reverbGain);
 this.reverbGain.connect(this.master);
-
+this.recordDest = null;
 this.channelPolyCount = new Array(16).fill(0);
 
     this.activeNotes = new Map();
@@ -1401,6 +1402,18 @@ this.programToSamples.set(key, samplesForProgram);
     console.log(`\nMapping complete: ${this.programToSamples.size} programs successfully mapped`);
     console.log(`Programs with samples:`, Array.from(this.programToSamples.keys()).slice(0, 20));
   }
+setRecordDestination(destNode) {
+  // destNode は MediaStreamAudioDestinationNode
+  // nullなら録音OFF
+  if (this.recordDest) {
+    try { this.master.disconnect(this.recordDest); } catch(e){}
+    this.recordDest = null;
+  }
+  if (destNode) {
+    this.recordDest = destNode;
+    this.master.connect(destNode);
+  }
+}
 
   findSample(channel, program, note) {
   // ===== bank決定（GM/GS/XG互換）=====
@@ -2150,6 +2163,119 @@ clearAllKeys();
   
   log("Stopped.");
 });
+const recBtn = document.getElementById("recBtn");
+const recStopBtn = document.getElementById("recStopBtn");
+
+recBtn.addEventListener("click", async () => {
+  if (!audioCtx || !synth) {
+    alert("先にSoundFontとMIDIを読み込んでください");
+    return;
+  }
+
+  // 録音用Stream作成
+  recordDest = audioCtx.createMediaStreamDestination();
+  synth.setRecordDestination(recordDest);
+
+  recordingStream = recordDest.stream;
+
+  recordedChunks = [];
+  recorder = new MediaRecorder(recordingStream);
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+
+  recorder.onstop = async () => {
+    // MediaRecorderは基本webm/oggになるのでPCMにしてWAV化する
+    const blob = new Blob(recordedChunks, { type: recorder.mimeType });
+
+    const arrayBuf = await blob.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+
+    const wavBlob = audioBufferToWavBlob(audioBuf);
+
+    const url = URL.createObjectURL(wavBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "midi_recording.wav";
+    a.click();
+    URL.revokeObjectURL(url);
+
+    // 録音分岐解除
+    synth.setRecordDestination(null);
+  };
+
+  recorder.start();
+  recBtn.disabled = true;
+  recStopBtn.disabled = false;
+});
+
+recStopBtn.addEventListener("click", () => {
+  if (recorder && recorder.state !== "inactive") {
+    recorder.stop();
+  }
+  recBtn.disabled = false;
+  recStopBtn.disabled = true;
+});
+function audioBufferToWavBlob(audioBuffer) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+
+  // interleave
+  const length = audioBuffer.length;
+  const interleaved = new Float32Array(length * numChannels);
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    const channelData = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      interleaved[i * numChannels + ch] = channelData[i];
+  }
+  }
+
+
+  // float -> int16
+  const pcm16 = new Int16Array(interleaved.length);
+  for (let i = 0; i < interleaved.length; i++) {
+    let s = Math.max(-1, Math.min(1, interleaved[i]));
+    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+
+  // WAV header
+  const byteRate = sampleRate * numChannels * (bitDepth / 8);
+  const blockAlign = numChannels * (bitDepth / 8);
+  const buffer = new ArrayBuffer(44 + pcm16.length * 2);
+  const view = new DataView(buffer);
+
+  function writeString(offset, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + pcm16.length * 2, true);
+  writeString(8, "WAVE");
+
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+
+  writeString(36, "data");
+  view.setUint32(40, pcm16.length * 2, true);
+
+  // PCM data
+  let offset = 44;
+  for (let i = 0; i < pcm16.length; i++, offset += 2) {
+    view.setInt16(offset, pcm16[i], true);
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+}
 window.addEventListener('DOMContentLoaded', initMidiAccess);
 </script>
 </body>
