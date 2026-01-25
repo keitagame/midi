@@ -72,6 +72,40 @@
   font-size:8px;
   color:#ffffff;
 }
+.compatMenu{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:10px 0 12px 0;
+}
+
+.compatBtn{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border:1px solid #333;
+  background:#111;
+  color:#ddd;
+  border-radius:0px;
+  cursor:pointer;
+  font-family:"Renner", sans-serif;
+  font-size:12px;
+}
+
+.compatBtn .ico{ font-size:14px; }
+.compatBtn.active{
+  background:#222;
+  border-color:#666;
+  color:#fff;
+}
+
+.compatHint{
+  margin-left:10px;
+  font-size:12px;
+  color:#aaa;
+}
+
 </style>
 </head>
 <body>
@@ -96,7 +130,7 @@
     Realtime MIDI
   </label>
 </div>
-
+</div>
   <!-- 既存のMIDI Fileの入力の下に追加 -->
 <div class="file-input">
   <label>MIDI Output: </label>
@@ -120,7 +154,7 @@
     Both
   </label>
 </div>
-</div>
+
   <div class="file-input">
     <label>SoundFont (.sf2): </label>
     <input type="file" id="sf2File" accept=".sf2" />
@@ -131,7 +165,21 @@
     <label>MIDI File (.mid): </label>
     <input type="file" id="midiFile" accept=".mid,.midi" />
   </div>
-  
+  <!-- ▼ 互換モード切替メニュー -->
+<div id="compatMenu" class="compatMenu">
+  <button class="compatBtn active" data-mode="GM" title="General MIDI">
+    <span class="txt">GM</span>
+  </button>
+  <button class="compatBtn" data-mode="GS" title="Roland GS">
+    <span class="txt">GS</span>
+  </button>
+  <button class="compatBtn" data-mode="XG" title="Yamaha XG">
+   <span class="txt">XG</span>
+  </button>
+
+  <div class="compatHint" id="compatHint">Mode: GM</div>
+</div>
+
   <button id="playBtn">Play</button>
   <button id="stopBtn">Stop</button>
   
@@ -145,6 +193,63 @@
 
 
 <script>
+// ===== GM/GS/XG 互換モード =====
+let compatMode = "GM"; // "GM" | "GS" | "XG"
+
+function setCompatMode(mode){
+  compatMode = mode;
+
+  // UI更新
+  document.querySelectorAll(".compatBtn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+  const hint = document.getElementById("compatHint");
+  if(hint) hint.textContent = `Mode: ${mode}`;
+
+  // 内部シンセの初期化（音量/パン/プログラム等）
+  if (synth && typeof synth.resetGM === "function") {
+    synth.resetGM();
+  }
+
+  // 外部MIDI出力にも反映したい場合（OutputModeがMIDI/Bothのとき）
+  // ※ ここは「あなたの既存 outputMode 判定」があるならそこに合わせてOK
+  sendSystemResetForMode(mode);
+
+  log(`[Compat] ${mode} mode selected`);
+}
+
+function sendSystemResetForMode(mode){
+  // selectedMidiOutput が無いなら何もしない
+  if (!selectedMidiOutput) return;
+
+  // 送るSysEx（代表的な初期化）
+  // GM1 System On: F0 7E 7F 09 01 F7
+  const GM_ON = [0xF0,0x7E,0x7F,0x09,0x01,0xF7];
+
+  // Roland GS Reset: F0 41 10 42 12 40 00 7F 00 41 F7
+  const GS_RESET = [0xF0,0x41,0x10,0x42,0x12,0x40,0x00,0x7F,0x00,0x41,0xF7];
+
+  // Yamaha XG System On: F0 43 10 4C 00 00 7E 00 F7
+  const XG_ON = [0xF0,0x43,0x10,0x4C,0x00,0x00,0x7E,0x00,0xF7];
+
+  let msg = GM_ON;
+  if(mode === "GS") msg = GS_RESET;
+  if(mode === "XG") msg = XG_ON;
+
+  try{
+    selectedMidiOutput.send(msg);
+  }catch(e){
+    console.warn("SysEx send failed:", e);
+  }
+}
+
+// メニューのクリックイベント
+document.addEventListener("click", (e)=>{
+  const btn = e.target.closest(".compatBtn");
+  if(!btn) return;
+  setCompatMode(btn.dataset.mode);
+});
+
 const keyboardsWrap = document.getElementById("keyboards");
 
 // chごとの key要素を保持する
