@@ -1466,6 +1466,17 @@ mapProgramByMode(program, channel){
   // GMはそのまま
   return p;
 }
+resetFXSends(){
+  const now = this.audioCtx.currentTime;
+  for(let ch=0; ch<16; ch++){
+    this.channelReverbSend[ch] = 0;
+    this.channelChorusSend[ch] = 0;
+    this.revSendByCh[ch].gain.cancelScheduledValues(now);
+    this.choSendByCh[ch].gain.cancelScheduledValues(now);
+    this.revSendByCh[ch].gain.setValueAtTime(0, now);
+    this.choSendByCh[ch].gain.setValueAtTime(0, now);
+  }
+}
 
   findSample(channel, program, note) {
   // ===== bank決定（GM/GS/XG互換）=====
@@ -1593,6 +1604,7 @@ bank = 128;
 
 applyModeFXDefaults(mode){
   // モード別の初期値（好みで調整）
+  this.resetFXSends(); 
   let rev = 40;
   let cho = 0;
 
