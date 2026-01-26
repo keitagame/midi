@@ -1421,51 +1421,119 @@ setRecordDestination(destNode) {
 }
 // ★GS/XG用：プログラム強制置換
 mapProgramByMode(program, channel){
-  // Drumチャンネルは触らない（必要なら別処理）
+  // Drumチャンネルは触らない
   if (channel === 9) return program & 0x7F;
 
   const p = program & 0x7F;
 
-  // ===== GS置換（SC-88っぽい方向）=====
+  // ===== GS置換（SC-88っぽい方向：硬め/まとまる）=====
   if (compatMode === "GS") {
-    // 例：FM/ゲームっぽくなる置換（好みで増やしてOK）
     const GS_MAP = {
-      80: 81, // Lead1 Square -> Lead2 Saw（少し派手）
-      81: 80, // Saw -> Square
-      98: 89, // Crystal -> Warm Pad
+      // Piano / EP
+      0: 0,    // Piano1 -> Piano1（あえて据え置き）
+      1: 0,    // Bright -> Piano1（少し落ち着かせる）
+      4: 4,    // EP1
+      5: 4,    // EP2 -> EP1
+
+      // Organ
+      16: 17,  // Drawbar -> Percussive Organ
+      17: 16,  // Percussive -> Drawbar
+
+      // Guitar
+      24: 26,  // Nylon -> Jazz Guitar（GSっぽく変化）
+      25: 27,  // Steel -> Clean Guitar
+
+      // Bass
+      32: 33,  // Bass -> Finger Bass
+      33: 34,  // Finger -> Pick Bass
+
+      // Strings / Ensemble
+      48: 49,  // Strings -> Slow Strings
+      49: 48,  // Slow -> Strings
+
+      // Brass
+      56: 60,  // Trumpet -> French Horn
+      57: 58,  // Trombone -> Tuba
+
+      // Synth Lead
+      80: 81,  // Square -> Saw
+      81: 80,  // Saw -> Square
+      84: 85,  // Charang -> Solo Vox
+      87: 80,  // Bass+Lead -> Square（ゲームっぽく）
+
+      // Pad
+      88: 92,  // NewAge -> Choir Pad
+      89: 88,  // WarmPad -> NewAge
+      90: 89,  // Polysynth -> WarmPad
+      92: 95,  // ChoirPad -> SweepPad
+
+      // FX
+      98: 89,  // Crystal -> Warm Pad
       100: 92, // Atmosphere -> Choir Pad
       102: 95, // Echoes -> Sweep Pad
-      118: 115, // Synth Drum -> Woodblock(遊び)
+
+      // Percussive
+      118: 115 // Synth Drum -> Woodblock
     };
 
-    if (GS_MAP[p] !== undefined) return GS_MAP[p];
-    return p;
+    return (GS_MAP[p] !== undefined) ? GS_MAP[p] : p;
   }
 
-  // ===== XG置換（MUっぽい方向）=====
+  // ===== XG置換（MUっぽい方向：派手/明るい/シンセ寄り）=====
   if (compatMode === "XG") {
     const XG_MAP = {
-      0: 1,   // Piano1 -> Bright Piano
-      4: 5,   // EP1 -> EP2
-      24: 25, // Nylon -> Steel Guitar
-      32: 33, // Bass -> Finger Bass
-      48: 50, // Strings -> Synth Strings1
-      52: 53, // ChoirAahs -> VoiceOohs
-      56: 57, // Trumpet -> Trombone
-      80: 81, // Square -> Saw
-      81: 80, // Saw -> Square
-      84: 87, // Charang -> Lead8 Bass+Lead
-      89: 90, // WarmPad -> Polysynth
-      98: 101,// Crystal -> Goblins
+      // Piano / EP（明るくする）
+      0: 1,    // Piano1 -> Bright Piano
+      1: 2,    // Bright -> Electric Grand
+      4: 5,    // EP1 -> EP2
+      5: 6,    // EP2 -> Harpsichord（派手に）
+
+      // Organ
+      16: 19,  // Drawbar -> Church Organ
+      17: 18,  // Percussive -> Rock Organ
+
+      // Guitar
+      24: 25,  // Nylon -> Steel
+      25: 29,  // Steel -> Overdriven Guitar
+      26: 30,  // Jazz -> Distortion Guitar
+
+      // Bass
+      32: 38,  // Bass -> Synth Bass 1
+      33: 39,  // Finger -> Synth Bass 2
+
+      // Strings / Choir
+      48: 50,  // Strings -> Synth Strings1
+      49: 51,  // Slow Strings -> Synth Strings2
+      52: 53,  // ChoirAahs -> VoiceOohs
+
+      // Brass
+      56: 57,  // Trumpet -> Trombone
+      60: 61,  // French Horn -> Brass Section
+
+      // Synth Lead（派手に）
+      80: 81,  // Square -> Saw
+      81: 80,  // Saw -> Square
+      84: 87,  // Charang -> Bass+Lead
+      85: 86,  // Solo Vox -> 5th Sawtooth
+
+      // Pad
+      88: 89,  // NewAge -> WarmPad
+      89: 90,  // WarmPad -> Polysynth
+      90: 94,  // Polysynth -> Halo Pad
+      92: 93,  // ChoirPad -> Bowed Glass
+
+      // FX（さらに変える）
+      98: 101, // Crystal -> Goblins
+      99: 102, // Soundtrack -> Echoes
+      100: 103 // Atmosphere -> Sci-Fi
     };
 
-    if (XG_MAP[p] !== undefined) return XG_MAP[p];
-    return p;
+    return (XG_MAP[p] !== undefined) ? XG_MAP[p] : p;
   }
 
-  // GMはそのまま
-  return p;
+  return p; // GMはそのまま
 }
+
 resetFXSends(){
   const now = this.audioCtx.currentTime;
   for(let ch=0; ch<16; ch++){
