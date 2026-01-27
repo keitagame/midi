@@ -409,6 +409,9 @@ if (inputs.length === 0) {
     document.getElementById('midiOutputStatus').style.color = '#a44';
   }
 }
+function isMelodyChannel(ch) {
+  return ch === 0; // 1chをメロディー
+}
 
 // MIDI出力関数
 function sendMidiMessage(status, data1, data2) {
@@ -1415,6 +1418,7 @@ setRecordDestination(destNode) {
   }
 }
 
+
   findSample(channel, program, note) {
   // ===== bank決定（GM/GS/XG互換）=====
   let bank = 0;
@@ -1590,14 +1594,17 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
     const gain = this.audioCtx.createGain();
     const vel = Math.pow(velocity / 127, 0.6);
 
-const melodyGain = this.melodyBoost[channel] ?? 1.0;
+const isMelody = (channel === 0);
+
+const melodyGain = isMelody ? 4.8 : 0.4;
+
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
 const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
-  vel *
+  vel * melodyGain*
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
