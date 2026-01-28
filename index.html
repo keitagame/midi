@@ -118,7 +118,18 @@
   </select>
   <span id="midiInputStatus" class="status"></span>
 </div>
-
+<label>
+  Melody CH :
+  <input
+    id="melodyChSlider"
+    type="range"
+    min="0"
+    max="15"
+    step="1"
+    value="1"
+  >
+  <span id="melodyChLabel">1</span>
+</label>
 <div class="file-input">
   <label>Input Mode: </label>
   <label style="margin-right:15px;">
@@ -176,18 +187,7 @@
   <button class="compatBtn" data-mode="XG" title="Yamaha XG">
    <span class="txt">XG</span>
   </button>
-<label>
-  Melody CH :
-  <input
-    id="melodyChSlider"
-    type="range"
-    min="0"
-    max="15"
-    step="1"
-    value="1"
-  >
-  <span id="melodyChLabel">1</span>
-</label>
+
 
   <div class="compatHint" id="compatHint">Mode: GM</div>
 </div>
@@ -1262,7 +1262,13 @@ case 93: // Chorus Send
     for (let presetIdx = 0; presetIdx < this.sf.presets.length; presetIdx++) {
       const preset = this.sf.presets[presetIdx];
       const program = preset.preset;
-      const bank = preset.bank;
+      // buildProgramMapping() 冒頭の preset ループ内
+const bank = preset.bank;
+
+if (compatMode === "GM") {
+  if (bank !== 0 && bank !== 128) continue;
+}
+
       
       // 通常はbank 0を使用
       //if (bank !== 0 && bank !== 128) continue;
