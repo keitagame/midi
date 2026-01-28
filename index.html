@@ -176,6 +176,18 @@
   <button class="compatBtn" data-mode="XG" title="Yamaha XG">
    <span class="txt">XG</span>
   </button>
+<label>
+  Melody CH :
+  <input
+    id="melodyChSlider"
+    type="range"
+    min="1"
+    max="16"
+    step="1"
+    value="1"
+  >
+  <span id="melodyChLabel">1</span>
+</label>
 
   <div class="compatHint" id="compatHint">Mode: GM</div>
 </div>
@@ -194,6 +206,21 @@
 
 
 <script>
+  let melodyCh = null;       // null = 自動
+let melodyChManual = false;
+
+const slider = document.getElementById("melodyChSlider");
+const label  = document.getElementById("melodyChLabel");
+
+slider.addEventListener("input", () => {
+  melodyCh = slider.value - 1;
+  melodyChManual = true;
+
+  label.textContent = slider.value;
+
+  applyMelodyChannel();
+});
+
 // ===== GM/GS/XG 互換モード =====
 let compatMode = "GM"; // "GM" | "GS" | "XG"
 
@@ -1594,7 +1621,7 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
     const gain = this.audioCtx.createGain();
     const vel = Math.pow(velocity / 127, 0.6);
 
-const isMelody = (channel === 0);
+const isMelody = (channel === melodyCh);
 
 const melodyGain = isMelody ? 4.8 : 0.4;
 
