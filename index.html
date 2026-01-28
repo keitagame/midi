@@ -181,8 +181,8 @@
   <input
     id="melodyChSlider"
     type="range"
-    min="1"
-    max="16"
+    min="0"
+    max="15"
     step="1"
     value="1"
   >
@@ -213,7 +213,7 @@ const slider = document.getElementById("melodyChSlider");
 const label  = document.getElementById("melodyChLabel");
 
 slider.addEventListener("input", () => {
-  melodyCh = slider.value - 1;
+  melodyCh = slider.value;
   melodyChManual = true;
 
   label.textContent = slider.value;
@@ -1623,7 +1623,7 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
 
 const isMelody = (channel === melodyCh);
 
-const melodyGain = isMelody ? 4.8 : 0.4;
+const melodyGain = isMelody ? 4.2 : 1.0;
 
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
@@ -1631,7 +1631,7 @@ const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
-  vel * melodyGain*
+  vel *
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
