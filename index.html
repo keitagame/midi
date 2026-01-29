@@ -1392,8 +1392,9 @@ const safeRootKey =
   const newEntry = {
     sampleIdx,
     rootKey:safeRootKey,
-    coarseTune,
-    fineTune
+pitchCorrection: sampleInfo.pitchCorrection ?? 0,
+    coarseTune:0,
+    fineTune:0
   };
 
   const prev = samplesForProgram[note];
@@ -1401,7 +1402,8 @@ const safeRootKey =
     samplesForProgram[note] = newEntry;
   } else {
     const prevDiff = Math.abs(prev.rootKey - note);
-    const newDiff  = Math.abs(rootKey - note);
+const newDiff  = Math.abs(newEntry.rootKey - note);
+
     if (newDiff < prevDiff) {
       samplesForProgram[note] = newEntry;
     }
@@ -1595,22 +1597,31 @@ if (!result) return;
     
     // 時刻が負の値にならないように保証
     const now = this.audioCtx.currentTime;
-    const scheduleTime = Math.max(when, now);
+    const scheduleTime = Math.max(when, now+0.005);
     
     const source = this.audioCtx.createBufferSource();
     
     source.buffer = sampleInfo.buffer;
 
 const cents = sampleInfo.pitchCorrection || 0;
- const bend = this.channelPitchBend[channel] / 8192 * 2; // ±2 semitone
+ const bendRange = 2; // semitone
+const pitchCorrection =
+  (entry.pitchCorrection ?? 0) / 100; // cents → semitone
+const bend =
+  (this.channelPitchBend[channel] - 8192) / 8192 * bendRange;
+
 const pitch =
   note
   - entry.rootKey
   + entry.coarseTune
   + entry.fineTune / 100
+  + (entry.pitchCorrection ?? 0) / 100
   + bend;
 
 source.playbackRate.value = Math.pow(2, pitch / 12);
+
+
+
 
 
 
@@ -1644,7 +1655,7 @@ const gmGain =
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
   gmGain,
-  scheduleTime + 0.2
+  scheduleTime + 0.0002
 );
 
 
@@ -1702,8 +1713,8 @@ panNode.connect(this.channelGains[channel]);
     const scheduleTime = Math.max(when, now);
     
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.3);
-    source.stop(scheduleTime + 0.4);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.2);
+    source.stop(scheduleTime + 0.22);
     
     this.activeNotes.delete(key);
   }
