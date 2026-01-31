@@ -207,6 +207,115 @@
 
 
 <script>
+  // ===== Melody Detection =====
+const melodyScore = new Array(16).fill(0);
+let lastMelodyCh = 0;
+let stableCount = 0;
+
+const channelPoly = new Uint8Array(16);
+const noteStats = Array.from({length:16}, () => ({
+  count: 0,
+  sumNote: 0,
+  lastTime: 0
+}));
+function onNoteOnForMelodyDetect(ch, note, velocity){
+  if(ch === 9) return;
+
+  channelPoly[ch]++;
+
+  // ===== 単音最優先 =====
+  if(channelPoly[ch] === 1){
+    melodyScore[ch] += 4.0;
+  }else{
+    melodyScore[ch] -= channelPoly[ch] * 2.0;
+  }
+
+  // ===== 音域（C4〜C6）=====
+  if(note >= 60 && note <= 84){
+    melodyScore[ch] += 2.5;
+  }else if(note < 48){
+    melodyScore[ch] -= 3.0;
+  }
+
+  // ===== 音程変化 =====
+  const s = noteStats[ch];
+  if(s.lastNote !== undefined){
+    const diff = Math.abs(note - s.lastNote);
+    melodyScore[ch] += Math.min(diff / 6, 2.0);
+  }
+  s.lastNote = note;
+
+  // ===== ノート密度 =====
+  const now = performance.now() * 0.001; // 秒
+
+  if(s.lastTime){
+    const dt = now - s.lastTime;
+    if(dt < 0.3) melodyScore[ch] += 1.5;
+    else if(dt > 0.9) melodyScore[ch] -= 1.0;
+  }
+  s.lastTime = now;
+
+  // velocityは弱めに
+  melodyScore[ch] += (velocity / 127) * 0.5;
+}
+function onNoteOffForMelodyDetect(ch){
+  if(ch === 9) return;
+  if(channelPoly[ch] > 0) channelPoly[ch]--;
+}
+function updateMelodyScoreByVolume(){
+  for(let ch=0; ch<16; ch++){
+    if(ch === 9) continue;
+
+    const analyser = synth.channelAnalysers[ch];
+    if(!analyser) continue;
+
+    const buf = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(buf);
+
+    let sum = 0;
+    for(let i=0;i<buf.length;i++){
+      const v = (buf[i]-128)/128;
+      sum += v*v;
+    }
+    const rms = Math.sqrt(sum/buf.length);
+
+    // 補助レベルまで弱める
+    melodyScore[ch] += rms * 0.5;
+  }
+}
+function detectMelodyChannel(){
+  let bestCh = lastMelodyCh;
+  let bestScore = melodyScore[bestCh];
+
+  for(let ch=0; ch<16; ch++){
+    if(ch === 9) continue;
+
+    if(melodyScore[ch] > bestScore + 4.0){
+      bestScore = melodyScore[ch];
+      bestCh = ch;
+    }
+
+    melodyScore[ch] *= 0.88;
+  }
+
+  if(bestCh === lastMelodyCh){
+    stableCount++;
+  }else{
+    stableCount = 0;
+  }
+
+  if(stableCount >= 4){
+    
+    
+  }
+  
+  melodyCh = bestCh;
+    lastMelodyCh = bestCh;
+  slider.value = melodyCh;
+    label.textContent = melodyCh;
+}
+
+
   let melodyCh = 0;       // null = 自動
 let melodyChManual = false;
 
@@ -1103,6 +1212,9 @@ for (let ch = 0; ch < 16; ch++) {
     
     this.prepareSamples();
     this.buildProgramMapping();
+   
+  
+
   }
 
   prepareSamples() {
@@ -1643,13 +1755,14 @@ const isMelody = (channel == melodyCh);
 
 const melodyGain = isMelody ? 1.8 : 1.0;
 
+
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
 const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
-  vel * melodyGain *
+  vel * 
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
@@ -1677,8 +1790,8 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 1000000;
-filter.Q.value = 0.2;
+    filter.frequency.value = 10500;
+filter.Q.value = 0.0;
 
    
 
@@ -2189,6 +2302,9 @@ case 0xE: {
   
   log("Playing with SoundFont...");
   //animate(synth);
+  
+
+
   step();
 });
 
