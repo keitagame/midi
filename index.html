@@ -211,71 +211,109 @@
 const melodyScore = new Array(16).fill(0);
 let lastMelodyCh = 0;
 let stableCount = 0;
-
+const noteStats = Array(16).fill().map(() => ({ count: 0, sumNote: 0, lastTime: 0, activeNoteCount: 0 }));
 const channelPoly = new Uint8Array(16);
-const noteStats = Array.from({length:16}, () => ({
-  count: 0,
-  sumNote: 0,
-  lastTime: 0
-}));
-function onNoteOnForMelodyDetect(ch, note, velocity){
+function onNoteOffForMelodyDetect(ch, note) {
+  const s = noteStats[ch];
+  if (s.activeNoteCount > 0) {
+    s.activeNoteCount--; // ここでアクティブなノートを減らす
+  }
+}
+function onNoteOnForMelodyDetect(ch, note, velocity) {
   const s = noteStats[ch];
   s.count++;
-  s.sumNote += note;
-  s.lastTime = audioCtx.currentTime;
+  s.activeNoteCount++;
+  // 1. 高音域の重み付け (SC-88は高音をメロディと認識しやすい)
+  // ノート番号60(C4)以上を重視し、低音(ベース域)はスコアをほぼ加算しない
+  let pitchWeight = 0;
+  if (note >= 60) {
+    
+  pitchWeight = (note - 60) / 67 * 2.0; // 高いほど高得点
+  }else if(note >= 48){
+pitchWeight = (note - 60) / 67 * 1.0; // 高いほど高得点
 
-  // 高音を評価（SC-88っぽい）
-  melodyScore[ch] += (note / 127) * 2.0;
+  } else if (note < 48) {
+    pitchWeight = -10.0; // 低すぎる音(ベース等)はマイナス評価
+  }
 
-  // 強く弾かれた音も評価
-  melodyScore[ch] += (velocity / 127) * 1.5;
+  // 2. ベロシティによる重み付け
+  const velWeight = (velocity / 127) * 1.2;
+
+  melodyScore[ch] += (pitchWeight + velWeight);
 }
 
-function updateMelodyScoreByVolume(){
-  for(let ch=0; ch<16; ch++){
-    if(ch === 9) continue; // ドラム除外
+function updateMelodyScoreByVolume() {
+  for (let ch = 0; ch < 16; ch++) {
+    if (ch === 9) continue; 
 
+    // 3. RMS（音量）による評価
+    // 実際に鳴っている音量に即座に反応させる
     const analyser = synth.channelAnalysers[ch];
     const buf = new Uint8Array(analyser.fftSize);
     analyser.getByteTimeDomainData(buf);
 
     let sum = 0;
-    for(let i=0;i<buf.length;i++){
-      const v = (buf[i]-128)/128;
-      sum += v*v;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      sum += v * v;
     }
-    const rms = Math.sqrt(sum/buf.length);
+    const rms = Math.sqrt(sum / buf.length);
 
-    melodyScore[ch] += rms * 8.0; // ここ重要
+    // 音量による加点はメロディ検出の決定打になることが多い
+    melodyScore[ch] += rms * 10.0; 
   }
 }
 
-function detectMelodyChannel(){
-  let bestCh = 0;
-  let bestScore = 0;
+function detectMelodyChannel() {
+  let bestCh = melodyCh; // 急激なチャタリングを防ぐため現在のチャンネルを保持
+  let maxScore = -999;
 
-  for(let ch=0; ch<16; ch++){
-    if(ch === 9) continue; // Drum
-
-    // 平均音程を加点
-    const s = noteStats[ch];
-    if(s.count > 0){
+  for (let ch = 0; ch < 16; ch++) {
+    if (ch === 9) continue;
+const s = noteStats[ch];
+    if (s.count > 0) {
       const avgNote = s.sumNote / s.count;
       melodyScore[ch] += avgNote / 64;
+      
+      // 統計を少しずつ減衰させ、後半でも新しい音に反応しやすくする
+      s.count *= 0.9;
+      s.sumNote *= 0.9;
     }
-
-    if(melodyScore[ch] > bestScore){
-      bestScore = melodyScore[ch];
+    // --- ★ここから単音ポイントの付与★ ---
+    if (s.activeNoteCount == 1) {
+      // 現在単音で鳴っている場合に高いボーナス点を加算
+      melodyScore[ch] += 7.0; 
+    } else if (s.activeNoteCount > 1) {
+      // 複数の音が同時に鳴っている（和音・伴奏）場合はわずかに減点またはボーナスなし
+      // melodyScore[ch] -= 0.5; // 必要なら減点
+    }
+    // --- ★ここまで★ ---
+const idleTime = audioCtx.currentTime - s.lastTime;
+    if (idleTime > 0.5) { 
+      melodyScore[ch] *= 1; // 0.5秒鳴っていないチャンネルはスコア半減
+    }
+    // 4. チャネル固有の傾向（SC-88的な優先度）
+    // Ch.4などはメロディに使われやすいという統計的な重み（任意）
+    
+    if (melodyScore[ch] > maxScore) {
+      maxScore = melodyScore[ch];
       bestCh = ch;
     }
 
-    // 少しずつ減衰（SC-88っぽさ）
-    melodyScore[ch] *= 0.95;
+    // 5. 減衰 (SC-88は「今」鳴っている音を優先するため、減衰は強めにする)
+    // 0.95だと蓄積が長すぎる場合、0.85〜0.9程度に調整
+    melodyScore[ch] *= 0.8; 
+    
+    // スコアが低くなりすぎないよう下限を設定
+    if(melodyScore[ch] < 0) melodyScore[ch] = 0;
   }
 
-  melodyCh = bestCh;
-  slider.value=melodyCh;
-  label.textContent = slider.value;
+  // 頻繁な切り替わりを抑えるための微調整
+  if (maxScore > 0.1) {
+    melodyCh = bestCh;
+    slider.value = melodyCh;
+    label.textContent = melodyCh; // 表示は1-16
+  }
 }
 
 
@@ -1725,7 +1763,7 @@ const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
-  vel * melodyGain
+  vel * 
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
