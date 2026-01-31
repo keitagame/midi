@@ -1122,7 +1122,7 @@ class SoundFontSynth {
     this.sf = soundFont;
     this.master = audioCtx.createGain();
     this.master.gain.value = 0.15; // 実機相当
-
+this.channelPanners = [];
     this.master.connect(audioCtx.destination);
     
     this.channelAnalysers = [];
@@ -1132,10 +1132,14 @@ class SoundFontSynth {
       analyser.fftSize = 2048;
       const gain = audioCtx.createGain();
       gain.gain.value = 1.0;
+const pan = audioCtx.createStereoPanner();
+  pan.pan.value = 0; // center
       gain.connect(analyser);
+pan.connect(analyser);
       analyser.connect(this.master);
       this.channelAnalysers.push(analyser);
       this.channelGains.push(gain);
+this.channelPanners.push(pan);
     }
     this.channelProgramGain = new Array(16).fill(1.0);
 
@@ -1148,6 +1152,7 @@ this.channelBankMSB       = new Array(16).fill(0);
 this.channelBankLSB       = new Array(16).fill(0);
 this.channelRPN           = new Array(16).fill(null);
 this.melodyBoost = new Array(16).fill(1.0);
+
 
 // デフォルトGM慣例
 this.melodyBoost[0] = 2.8; // Lead
@@ -1316,6 +1321,16 @@ for (let ch = 0; ch < 16; ch++) {
     console.log(`  Invalid: ${invalidSamples}`);
     console.log(`  Total buffers: ${this.sampleBuffers.size}`);
   }
+setPan(ch, value) {
+  // value: 0..127 → -1..+1
+  const p = (value - 64) / 64;
+  this.channelPanners[ch].pan.setTargetAtTime(
+    p,
+    this.audioCtx.currentTime,
+    0.01
+  );
+}
+
 controlChange(ch, cc, val) {
   switch (cc) {
     case 7:   // Volume
@@ -1323,6 +1338,7 @@ controlChange(ch, cc, val) {
       break;
 
     case 10:  // Pan
+      this.setPan(ch,val);
       this.channelPan[ch] = val;
       break;
 
