@@ -219,56 +219,23 @@ const noteStats = Array.from({length:16}, () => ({
   lastTime: 0
 }));
 function onNoteOnForMelodyDetect(ch, note, velocity){
-  if(ch === 9) return;
-
-  channelPoly[ch]++;
-
-  // ===== 単音最優先 =====
-  if(channelPoly[ch] === 1){
-    melodyScore[ch] += 4.0;
-  }else{
-    melodyScore[ch] -= channelPoly[ch] * 2.0;
-  }
-
-  // ===== 音域（C4〜C6）=====
-  if(note >= 60 && note <= 84){
-    melodyScore[ch] += 2.5;
-  }else if(note < 48){
-    melodyScore[ch] -= 3.0;
-  }
-
-  // ===== 音程変化 =====
   const s = noteStats[ch];
-  if(s.lastNote !== undefined){
-    const diff = Math.abs(note - s.lastNote);
-    melodyScore[ch] += Math.min(diff / 6, 2.0);
-  }
-  s.lastNote = note;
+  s.count++;
+  s.sumNote += note;
+  s.lastTime = audioCtx.currentTime;
 
-  // ===== ノート密度 =====
-  const now = performance.now() * 0.001; // 秒
+  // 高音を評価（SC-88っぽい）
+  melodyScore[ch] += (note / 127) * 2.0;
 
-  if(s.lastTime){
-    const dt = now - s.lastTime;
-    if(dt < 0.3) melodyScore[ch] += 1.5;
-    else if(dt > 0.9) melodyScore[ch] -= 1.0;
-  }
-  s.lastTime = now;
-
-  // velocityは弱めに
-  melodyScore[ch] += (velocity / 127) * 0.5;
+  // 強く弾かれた音も評価
+  melodyScore[ch] += (velocity / 127) * 1.5;
 }
-function onNoteOffForMelodyDetect(ch){
-  if(ch === 9) return;
-  if(channelPoly[ch] > 0) channelPoly[ch]--;
-}
+
 function updateMelodyScoreByVolume(){
   for(let ch=0; ch<16; ch++){
-    if(ch === 9) continue;
+    if(ch === 9) continue; // ドラム除外
 
     const analyser = synth.channelAnalysers[ch];
-    if(!analyser) continue;
-
     const buf = new Uint8Array(analyser.fftSize);
     analyser.getByteTimeDomainData(buf);
 
@@ -279,40 +246,36 @@ function updateMelodyScoreByVolume(){
     }
     const rms = Math.sqrt(sum/buf.length);
 
-    // 補助レベルまで弱める
-    melodyScore[ch] += rms * 0.5;
+    melodyScore[ch] += rms * 8.0; // ここ重要
   }
 }
+
 function detectMelodyChannel(){
-  let bestCh = lastMelodyCh;
-  let bestScore = melodyScore[bestCh];
+  let bestCh = 0;
+  let bestScore = 0;
 
   for(let ch=0; ch<16; ch++){
-    if(ch === 9) continue;
+    if(ch === 9) continue; // Drum
 
-    if(melodyScore[ch] > bestScore + 4.0){
+    // 平均音程を加点
+    const s = noteStats[ch];
+    if(s.count > 0){
+      const avgNote = s.sumNote / s.count;
+      melodyScore[ch] += avgNote / 64;
+    }
+
+    if(melodyScore[ch] > bestScore){
       bestScore = melodyScore[ch];
       bestCh = ch;
     }
 
-    melodyScore[ch] *= 0.88;
+    // 少しずつ減衰（SC-88っぽさ）
+    melodyScore[ch] *= 0.95;
   }
 
-  if(bestCh === lastMelodyCh){
-    stableCount++;
-  }else{
-    stableCount = 0;
-  }
-
-  if(stableCount >= 4){
-    
-    
-  }
-  
   melodyCh = bestCh;
-    lastMelodyCh = bestCh;
-  slider.value = melodyCh;
-    label.textContent = melodyCh;
+  slider.value=melodyCh;
+  label.textContent = slider.value;
 }
 
 
@@ -1762,7 +1725,7 @@ const progGain = this.channelProgramGain[channel] ?? 1.0;
    const vol = this.channelVolume[channel] / 127;
 const expr = this.channelExpression[channel] / 127;
 const gmGain =
-  vel * 
+  vel * melodyGain
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
 const attGain = attenuationToGain(entry.attenuation);
@@ -2302,7 +2265,13 @@ case 0xE: {
   
   log("Playing with SoundFont...");
   //animate(synth);
-  
+  setInterval(()=>{
+  if(!melodyChManual){
+    updateMelodyScoreByVolume();
+    detectMelodyChannel();
+  }
+}, 100);
+
 
 
   step();
