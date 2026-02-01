@@ -105,7 +105,21 @@
   font-size:12px;
   color:#aaa;
 }
+.chInfo{
+  width:200px;
+  font-size:8px;
+  color:#9f9;
+display:flex;
+}
 
+.instName{
+  white-space:nowrap;
+  overflow:hidden;
+}
+canvas{
+image-rendering: pixelated;
+
+}
 </style>
 </head>
 <body>
@@ -207,6 +221,18 @@
 
 
 <script>
+const channelUI = new Array(16);
+function updateChannelInstrument(ch){
+  if(!channelUI[ch]) return;
+
+  const prog = synth.channelPrograms[ch];
+  const preset =
+    synth.sf.presets.find(p=>p.preset===prog && p.bank===0);
+
+  channelUI[ch].inst.textContent =
+    preset ? preset.name : `Prog ${prog}`;
+}
+
   // ===== Melody Detection =====
 const melodyScore = new Array(16).fill(0);
 let lastMelodyCh = 0;
@@ -428,39 +454,57 @@ function buildKeyboardForChannel(ch){
   const row = document.createElement("div");
   row.className = "kbRow";
 
-  const label = document.createElement("div");
-  label.className = "kbLabel";
-  label.textContent = `Ch ${ch}`;
+  // チャンネル情報エリア
+  const info = document.createElement("div");
+  info.className = "chInfo";
+
+  const chLabel = document.createElement("div");
+  chLabel.textContent = `Ch ${ch}`;
+  chLabel.className = "kbLabel";
+
+  const inst = document.createElement("div");
+  inst.className = "instName";
+  inst.textContent = "---";
+
+  
+
+  info.appendChild(chLabel);
+  info.appendChild(inst);
+  
 
   const kb = document.createElement("div");
   kb.className = "keyboard";
 
+  // 既存の鍵盤生成はそのまま
   let x = 0;
-
   for(let note=0; note<128; note++){
     const key = document.createElement("div");
     const black = isBlack(note);
-
-    key.className = `key ${black ? "black":"white"}`;
-    key.dataset.note = note;
+    key.className = `key ${black?"black":"white"}`;
 
     if(!black){
       key.style.left = `${x}px`;
       x += 6;
     }else{
-      key.style.left = `${x - 3.5}px`;
+      key.style.left = `${x-3.5}px`;
     }
 
     kb.appendChild(key);
     keyElemsByCh[ch][note] = key;
   }
-
   kb.style.width = `${x}px`;
 
-  row.appendChild(label);
+  row.appendChild(info);
   row.appendChild(kb);
   keyboardsWrap.appendChild(row);
+const canvas = document.createElement("canvas");
+  canvas.width = 60;
+  canvas.height = 14;
+row.appendChild(canvas);
+  // ★ チャンネル情報を保存
+  channelUI[ch] = { inst, canvas };
 }
+
 
 function initKeyboards(){
   keyboardsWrap.innerHTML = "";
@@ -1164,6 +1208,7 @@ const pan = audioCtx.createStereoPanner();
       gain.connect(analyser);
 pan.connect(analyser);
       analyser.connect(this.master);
+
       this.channelAnalysers.push(analyser);
       this.channelGains.push(gain);
 this.channelPanners.push(pan);
@@ -1905,6 +1950,7 @@ getProgramGain(program) {
   // ★ここを修正
   this.channelProgramGain[channel] =
     this.getProgramGain(program);
+updateChannelInstrument(channel);
 }
 resetGM() {
   for (let ch = 0; ch < 16; ch++) {
@@ -1932,6 +1978,28 @@ function clearKeyboard() {
     keyOff(i);
   }
 }
+function drawChannelWave(ch){
+  const ui = channelUI[ch];
+  if(!ui) return;
+
+  const analyser = synth.channelAnalysers[ch];
+  const buf = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(buf);
+
+  const ctx = ui.canvas.getContext("2d");
+  ctx.clearRect(0,0,ui.canvas.width,ui.canvas.height);
+
+  ctx.beginPath();
+  for(let i=0;i<ui.canvas.width;i++){
+    const v = buf[i]/255;
+    const y = (1-v)*ui.canvas.height;
+    if(i===0) ctx.moveTo(i,y);
+    else ctx.lineTo(i,y);
+  }
+  ctx.strokeStyle = "#0f0";
+  ctx.stroke();
+}
+
 // ============ MIDI Parser (元のコードから) ============
 function parseMidi(arrayBuffer) {
   const data = new DataView(arrayBuffer);
@@ -2251,7 +2319,9 @@ if (inputMode === 'realtime') {
       const ev = all[idx];
       const evTimeMs = ticksToSeconds(ev.absTicks, tempoMap, division) * 1000;
       const deltaMs = evTimeMs - (now - startTicks);
-      
+      for(let ch=0;ch<16;ch++){
+    drawChannelWave(ch);
+  }
       if (deltaMs <= lookAhead * 1000) {
         // スケジュール時刻を計算（最小でも現在時刻+10msを保証）
         const scheduleTime = Math.max(audioNow + deltaMs / 1000, audioNow + 0.01);
@@ -2432,6 +2502,7 @@ recBtn.addEventListener("click", async () => {
   recBtn.disabled = true;
   recStopBtn.disabled = false;
 });
+
 
 recStopBtn.addEventListener("click", () => {
   if (recorder && recorder.state !== "inactive") {
