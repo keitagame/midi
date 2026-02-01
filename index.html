@@ -108,7 +108,7 @@
 .chInfo{
   width:200px;
   font-size:8px;
-  color:#9f9;
+  color:#fff;
 display:flex;
 }
 
@@ -117,7 +117,9 @@ display:flex;
   overflow:hidden;
 }
 canvas{
-image-rendering: pixelated;
+width:80px;
+height:20px;
+
 
 }
 </style>
@@ -498,8 +500,9 @@ function buildKeyboardForChannel(ch){
   row.appendChild(kb);
   keyboardsWrap.appendChild(row);
 const canvas = document.createElement("canvas");
-  canvas.width = 60;
-  canvas.height = 14;
+canvas.width=200;
+canvas.height=50;
+
 row.appendChild(canvas);
   // ★ チャンネル情報を保存
   channelUI[ch] = { inst, canvas };
@@ -1185,6 +1188,20 @@ class SoundFontParser {
     return v;
   }
 }
+function setupHiDPICanvas(canvas, cssW, cssH){
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.style.width  = cssW + "px";
+  canvas.style.height = cssH + "px";
+
+  canvas.width  = cssW * dpr;
+  canvas.height = cssH * dpr;
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  return ctx;
+}
 
 // ============ SoundFont Synth ============
 class SoundFontSynth {
@@ -1201,6 +1218,7 @@ this.channelPanners = [];
     for (let i = 0; i < 16; i++) {
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
+analyser.smoothingTimeConstant = 0.0;
       const gain = audioCtx.createGain();
       gain.gain.value = 1.0;
 const pan = audioCtx.createStereoPanner();
@@ -1996,7 +2014,7 @@ function drawChannelWave(ch){
     if(i===0) ctx.moveTo(i,y);
     else ctx.lineTo(i,y);
   }
-  ctx.strokeStyle = "#0f0";
+  ctx.strokeStyle = "rgb(255, 255, 255)";
   ctx.stroke();
 }
 
