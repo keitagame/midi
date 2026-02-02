@@ -1866,16 +1866,20 @@ const melodyGain = isMelody ? 1.8 : 1.0;
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
 const progGain = this.channelProgramGain[channel] ?? 1.0;
-   const vol = this.channelVolume[channel] / 127;
+   let vol = this.channelVolume[channel] / 127;
+   
 const expr = this.channelExpression[channel] / 127;
-const gmGain =
+let gmGain =
   vel * 
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
+  if(channel == 9){
+    gmGain +=1.4;
+   }
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
   gmGain,
-  scheduleTime + 0.0002
+  scheduleTime + 0
 );
 
 
@@ -1931,10 +1935,17 @@ panNode.connect(this.channelGains[channel]);
     // 時刻が負の値にならないように保証
     const now = this.audioCtx.currentTime;
     const scheduleTime = Math.max(when, now);
-    
+    if(channel == 9){
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
     gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.2);
     source.stop(scheduleTime + 0.22);
+    
+    this.activeNotes.delete(key);
+    return;
+    }
+    gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.0);
+    source.stop(scheduleTime + 0.0);
     
     this.activeNotes.delete(key);
   }
