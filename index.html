@@ -1878,12 +1878,12 @@ let gmGain =
    }
 const attGain = attenuationToGain(entry.attenuation);
 
-const peak = gmGain * 6.4; // 一瞬だけ盛る
+const peak = gmGain * 1.4; // 一瞬だけ盛る
 
 gain.gain.cancelScheduledValues(now);
-gain.gain.setValueAtTime(0.0001, now);
-gain.gain.linearRampToValueAtTime(peak, now + 0.002); // 2ms
-gain.gain.linearRampToValueAtTime(gmGain, now + 0.012); // 12ms
+gain.gain.setValueAtTime(0, now);
+gain.gain.linearRampToValueAtTime(peak, now + 0); // 2ms
+gain.gain.linearRampToValueAtTime(gmGain, now + 0.002); // 12ms
 
 //gain.gain.linearRampToValueAtTime(
 //  gmGain,
@@ -1910,7 +1910,7 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 10500;
-filter.Q.value = 0.0;
+filter.Q.value = 0.3;
 
    
 
