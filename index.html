@@ -1874,7 +1874,7 @@ let gmGain =
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
   if(channel == 9){
-    gmGain +=1.4;
+    gmGain +=1.0;
    }
 const attGain = attenuationToGain(entry.attenuation);
 gain.gain.linearRampToValueAtTime(
