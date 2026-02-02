@@ -1877,10 +1877,18 @@ let gmGain =
     gmGain +=1.0;
    }
 const attGain = attenuationToGain(entry.attenuation);
-gain.gain.linearRampToValueAtTime(
-  gmGain,
-  scheduleTime + 0
-);
+
+const peak = gmGain * 6.4; // 一瞬だけ盛る
+
+gain.gain.cancelScheduledValues(now);
+gain.gain.setValueAtTime(0.0001, now);
+gain.gain.linearRampToValueAtTime(peak, now + 0.002); // 2ms
+gain.gain.linearRampToValueAtTime(gmGain, now + 0.012); // 12ms
+
+//gain.gain.linearRampToValueAtTime(
+//  gmGain,
+//  scheduleTime + 0
+//);
 
 
 
