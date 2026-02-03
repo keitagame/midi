@@ -1878,12 +1878,16 @@ let gmGain =
    }
 const attGain = attenuationToGain(entry.attenuation);
 
-const peak = gmGain * 1.4; // 一瞬だけ盛る
+const base = gmGain;
 
 gain.gain.cancelScheduledValues(now);
-gain.gain.setValueAtTime(0, now);
-gain.gain.linearRampToValueAtTime(peak, now + 0); // 2ms
-gain.gain.linearRampToValueAtTime(gmGain, now + 0.002); // 12ms
+gain.gain.setValueAtTime(0.0001, now);
+
+// 速いアタック（1ms）
+gain.gain.exponentialRampToValueAtTime(base, now + 0.001);
+
+// そのまま維持
+
 
 //gain.gain.linearRampToValueAtTime(
 //  gmGain,
