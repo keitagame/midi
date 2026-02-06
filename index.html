@@ -1956,8 +1956,8 @@ panNode.connect(this.channelGains[channel]);
     return;
     }
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.0);
-    source.stop(scheduleTime + 0.0);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.1);
+    source.stop(scheduleTime + 0.12);
     
     this.activeNotes.delete(key);
   }
