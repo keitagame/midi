@@ -1834,7 +1834,7 @@ const pitch =
   - entry.rootKey
   + entry.coarseTune
   + entry.fineTune / 100
-  + (entry.pitchCorrection ?? 0) / 100
+  + (sampleInfo.pitchCorrection ?? 0) / 100
   + bend;
 
 source.playbackRate.value = Math.pow(2, pitch / 12);
