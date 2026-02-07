@@ -2623,7 +2623,12 @@ async function loadDefaultSoundFont() {
     const parser = new SoundFontParser(arrayBuffer);
     const sfData = parser.parse();
 
-    synth = new SoundFontSynth(audioCtx, sfData);
+    const buf = await file.arrayBuffer();
+    
+   
+    
+    sf2Status.textContent = `✓ Loaded (${soundFont.samples.length} samples)`;
+    sf2Status.style.color = '#4a4';
 
     // GM初期化
     if (typeof synth.resetGM === "function") {
