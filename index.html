@@ -2631,9 +2631,7 @@ async function loadDefaultSoundFont() {
     sf2Status.style.color = '#4a4';
 
     // GM初期化
-    if (typeof synth.resetGM === "function") {
-      synth.resetGM();
-    }
+    
 
     document.getElementById("sf2Status").textContent =
       "✓ Default SoundFont loaded";
