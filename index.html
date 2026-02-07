@@ -1358,6 +1358,7 @@ for (let ch = 0; ch < 16; ch++) {
       }
       
       let sampleRate = sample.sampleRate;
+      
       if (!sampleRate || sampleRate < 3000 || sampleRate > 768000 || !isFinite(sampleRate)) {
         if (i < 5) console.log(`  ⚠ Invalid rate ${sampleRate}Hz, using 44100Hz`);
         sampleRate = 44100;
@@ -1823,7 +1824,7 @@ if (!result) return;
     source.buffer = sampleInfo.buffer;
 
 const cents = sampleInfo.pitchCorrection || 0;
- const bendRange = 2; // semitone
+ const bendRange = 0; // semitone
 const pitchCorrection =
   (entry.pitchCorrection ?? 0) / 100; // cents → semitone
 const bend =
@@ -1838,6 +1839,7 @@ const pitch =
   + bend;
 
 source.playbackRate.value = Math.pow(2, pitch / 12);
+
 
 
 
@@ -1956,8 +1958,8 @@ panNode.connect(this.channelGains[channel]);
     return;
     }
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.0);
-    source.stop(scheduleTime + 0.0);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.18);
+    source.stop(scheduleTime + 0.2);
     
     this.activeNotes.delete(key);
   }
@@ -2247,8 +2249,8 @@ function animate(synth) {
 
 // ============ UI ============
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-loadDefaultSoundFont();
 
+loadDefaultSoundFont();
 const sf2Input = document.getElementById('sf2File');
 const midiInput = document.getElementById('midiFile');
 const playBtn = document.getElementById('playBtn');
