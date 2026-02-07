@@ -2247,6 +2247,8 @@ function animate(synth) {
 
 // ============ UI ============
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+loadDefaultSoundFont();
+
 const sf2Input = document.getElementById('sf2File');
 const midiInput = document.getElementById('midiFile');
 const playBtn = document.getElementById('playBtn');
@@ -2611,6 +2613,37 @@ function audioBufferToWavBlob(audioBuffer) {
 
   return new Blob([view], { type: "audio/wav" });
 }
+async function loadDefaultSoundFont() {
+  try {
+    const res = await fetch("GM.sf2");
+    if (!res.ok) throw new Error("Failed to fetch default.sf2");
+
+    const arrayBuffer = await res.arrayBuffer();
+
+    const parser = new SoundFontParser(arrayBuffer);
+    const sfData = parser.parse();
+
+    synth = new SoundFontSynth(audioCtx, sfData);
+
+    // GM初期化
+    if (typeof synth.resetGM === "function") {
+      synth.resetGM();
+    }
+
+    document.getElementById("sf2Status").textContent =
+      "✓ Default SoundFont loaded";
+    document.getElementById("sf2Status").style.color = "#4a4";
+
+    console.log("Default SoundFont loaded");
+
+  } catch (e) {
+    console.error("Default SoundFont load failed:", e);
+    document.getElementById("sf2Status").textContent =
+      "✗ Default SoundFont load failed";
+    document.getElementById("sf2Status").style.color = "#a44";
+  }
+}
+
 window.addEventListener('DOMContentLoaded', initMidiAccess);
 </script>
 </body>
