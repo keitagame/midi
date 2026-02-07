@@ -2618,8 +2618,7 @@ async function loadDefaultSoundFont() {
     const res = await fetch("GM.sf2");
     if (!res.ok) throw new Error("Failed to fetch default.sf2");
 
-    const arrayBuffer = await res.arrayBuffer();
-
+   
     
 const buf = await res.arrayBuffer();
     const parser = new SoundFontParser(buf);
@@ -2631,7 +2630,7 @@ const buf = await res.arrayBuffer();
     sf2Status.textContent = `✓ Loaded (${soundFont.samples.length} samples)`;
     sf2Status.style.color = '#4a4';
 
-    // GM初期化
+    
     
 
     document.getElementById("sf2Status").textContent =
