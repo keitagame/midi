@@ -1803,6 +1803,19 @@ bank = 128;
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
+// noteOn の最初の方に追加
+for (const [key, info] of this.activeNotes.entries()) {
+  const [ch, n] = key.split("-").map(Number);
+  if (ch === channel) {
+    // 既存音を即座に減衰させる（レガート対策）
+    info.gain.gain.cancelScheduledValues(this.audioCtx.currentTime);
+    info.gain.gain.setTargetAtTime(
+      0,
+      this.audioCtx.currentTime,
+      0.002 // 20ms で畳む
+    );
+  }
+}
 
 const program = this.channelPrograms[channel];
 const result = this.findSample(channel, program, note);
@@ -1959,8 +1972,8 @@ panNode.connect(this.channelGains[channel]);
     return;
     }
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0);
-    source.stop(scheduleTime + 0);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.2);
+    source.stop(scheduleTime + 0.22);
     
     this.activeNotes.delete(key);
   }
