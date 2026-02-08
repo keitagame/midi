@@ -1885,10 +1885,10 @@ const attGain = attenuationToGain(entry.attenuation);
 const base = gmGain;
 
 gain.gain.cancelScheduledValues(now);
-gain.gain.setValueAtTime(0.0001, now);
+gain.gain.setValueAtTime(0.0, now);
 
 // 速いアタック（1ms）
-gain.gain.exponentialRampToValueAtTime(base, now + 0.001);
+gain.gain.exponentialRampToValueAtTime(base, now + 0);
 
 // そのまま維持
 
