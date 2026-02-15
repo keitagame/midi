@@ -36,11 +36,13 @@ margin-left:200px;
 }
 .bar.white {
   width: 2px;
-  height: 6px;
+  height: 4px;
   background: #717171;
   z-index: 1;
 }
-
+.bar.active.white {
+  background: rgb(255, 0, 0);
+}
 .key {
   position: absolute;
   bottom: 0;
@@ -75,19 +77,19 @@ margin-bottom:6px;
 #keyboards{
   display:flex;
   flex-direction:column;
-  gap:1px;
+  gap:0px;
   margin-top:0px;
 }
 
 .kbRow{
   display:flex;
   align-items:center;
-  gap:1px;
+  gap:0px;
 }
 .kLabel{
 padding-left:200px;
   width:50px;
-  font-size:8px;
+  font-size:5px;
   color:#ffffff;
 }
 .kbLabel{
@@ -247,6 +249,7 @@ height:20px;
 
 
 <script>
+let chvelocity = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 const channelUI = new Array(16);
 function updateChannelInstrument(ch){
   if(!channelUI[ch]) return;
@@ -1846,8 +1849,12 @@ noteNumberToName(n) {
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
-
-const k = document.querySelector(`.ch${channel}`);
+chvelocity[channel] = velocity;
+for(let a = 0; a < velocity; a++){
+const v = document.querySelector(`.vel${a}.ch${channel}`);
+v.classList.add("active");
+}
+const k = document.querySelector(`.kLabel.ch${channel}`);
 k.textContent="KNB:"+this.noteNumberToName(note);
 const program = this.channelPrograms[channel];
 const result = this.findSample(channel, program, note);
@@ -2062,12 +2069,21 @@ resetGM() {
 
 
 }
+
 function clearKeyboard() {
   for (let i = 0; i < 128; i++) {
     keyOff(i);
   }
 }
 function drawChannelWave(ch){
+
+console.log(chvelocity[ch]);
+let a = chvelocity[ch];
+const v = document.querySelector(`.vel${a}.ch${ch}`);
+v.classList.remove("active");
+if(chvelocity[ch]>0){
+chvelocity[ch]--;
+}
   const ui = channelUI[ch];
   if(!ui) return;
 
