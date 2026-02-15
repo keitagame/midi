@@ -1849,10 +1849,13 @@ noteNumberToName(n) {
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
+
+if(chvelocity[channel] < velocity){
 chvelocity[channel] = velocity;
 for(let a = 0; a < velocity; a++){
 const v = document.querySelector(`.vel${a}.ch${channel}`);
 v.classList.add("active");
+}
 }
 const k = document.querySelector(`.kLabel.ch${channel}`);
 k.textContent="KNB:"+this.noteNumberToName(note);
