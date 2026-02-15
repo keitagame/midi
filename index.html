@@ -25,6 +25,22 @@
   border:1px solid #222;
   overflow:hidden;
 }
+.bb{
+display:flex;
+margin-left:200px;
+}
+.bar {
+  
+  border: 1px solid #333;
+  box-sizing: border-box;
+}
+.bar.white {
+  width: 2px;
+  height: 6px;
+  background: #717171;
+  z-index: 1;
+}
+
 .key {
   position: absolute;
   bottom: 0;
@@ -479,9 +495,15 @@ const kLabel = document.createElement("div");
   const inst = document.createElement("div");
   inst.className = "instName";
   inst.textContent = "---";
-
-  
-
+const bb = document.createElement("div");
+bb.className = "bb";
+  for(let vel = 0; vel < 128; vel++){
+const bar = document.createElement("div");
+bar.className = `bar vel${vel} white ch${ch}`;
+bar.style.left = vel+3+"px";
+bb.appendChild(bar);
+}
+col.appendChild(bb);
   info.appendChild(chLabel);
   info.appendChild(inst);
   
