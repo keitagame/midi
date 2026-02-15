@@ -1942,15 +1942,15 @@ gain.gain.cancelScheduledValues(now);
 gain.gain.setValueAtTime(0.0, now);
 
 // 速いアタック（1ms）
-gain.gain.exponentialRampToValueAtTime(base, now + 0);
+//gain.gain.exponentialRampToValueAtTime(base, now + 0);
 
 // そのまま維持
 
 
-//gain.gain.linearRampToValueAtTime(
-//  gmGain,
-//  scheduleTime + 0
-//);
+gain.gain.linearRampToValueAtTime(
+  gmGain,
+  scheduleTime + 0
+);
 
 
 
