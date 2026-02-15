@@ -59,7 +59,7 @@ margin-bottom:6px;
 #keyboards{
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:1px;
   margin-top:0px;
 }
 
@@ -68,7 +68,12 @@ margin-bottom:6px;
   align-items:center;
   gap:1px;
 }
-
+.kLabel{
+padding-left:200px;
+  width:50px;
+  font-size:8px;
+  color:#ffffff;
+}
 .kbLabel{
   width:50px;
   font-size:8px;
@@ -458,7 +463,11 @@ function isBlack(note){ return blackNotes.includes(note % 12); }
 function buildKeyboardForChannel(ch){
   const row = document.createElement("div");
   row.className = "kbRow";
-
+  const col = document.createElement("div");
+  col.className = "kbCol";
+const kLabel = document.createElement("div");
+  kLabel.textContent = `KNB:`;
+  kLabel.className = `kLabel ch${ch}`;
   // チャンネル情報エリア
   const info = document.createElement("div");
   info.className = "chInfo";
@@ -501,6 +510,8 @@ function buildKeyboardForChannel(ch){
 
   row.appendChild(info);
   row.appendChild(kb);
+col.appendChild(kLabel);
+ keyboardsWrap.appendChild(col);
   keyboardsWrap.appendChild(row);
 const canvas = document.createElement("canvas");
 canvas.width=200;
@@ -1802,11 +1813,20 @@ bank = 128;
   };
 }
 
+noteNumberToName(n) {
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const octave = Math.floor(n / 12) - 1;
+  const name = names[n % 12];
+  return `${name}${octave}`;
+}
+
+
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
 
-
+const k = document.querySelector(`.ch${channel}`);
+k.textContent="KNB:"+this.noteNumberToName(note);
 const program = this.channelPrograms[channel];
 const result = this.findSample(channel, program, note);
 if (!result) return;
