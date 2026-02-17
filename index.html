@@ -1293,7 +1293,7 @@ this.reverb = audioCtx.createConvolver();
 this.reverb.buffer = createReverbIR(audioCtx, 1.6, 2.2);
 
 this.reverbGain = audioCtx.createGain();
-this.reverbGain.gain.value = 0.08; // リバーブ量
+this.reverbGain.gain.value = 0.25; // リバーブ量
 this.chorusDelay = audioCtx.createDelay(0.03);
 this.chorusDelay.delayTime.value = 0.015;
 
@@ -1914,7 +1914,7 @@ source.playbackRate.value = Math.pow(2, pitch / 12);
    
     // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
-    const vel = Math.pow(velocity / 127, 0.2);
+    const vel = Math.pow(velocity / 127, 0.4);
 
 const isMelody = (channel == melodyCh);
 
@@ -1971,7 +1971,7 @@ panNode.pan.value = (this.channelPan[channel] - 64) / 64;
     // フィルター追加（高周波ノイズを減らす）
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 10500;
+    filter.frequency.value = 16500;
 filter.Q.value = 0.3;
 
    
@@ -2014,8 +2014,8 @@ panNode.connect(this.channelGains[channel]);
     return;
     }
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0);
-    source.stop(scheduleTime + 0);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.05);
+    source.stop(scheduleTime + 0.05);
     
     this.activeNotes.delete(key);
   }
