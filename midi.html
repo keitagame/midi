@@ -266,6 +266,23 @@ height:20px;
 
 <script>
 const bigScopes = [];
+let smoothBuf = new Float32Array(2048);
+const smoothBufs = Array.from({length:16}, () => new Float32Array(2048));
+
+function getSmoothWave(analyser, ch){
+
+  const buf = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(buf);
+
+  const smoothBuf = smoothBufs[ch];
+
+  for(let i=0;i<buf.length;i++){
+    smoothBuf[i] = smoothBuf[i] * 0.9 + (buf[i] / 255) * 0.1;
+  }
+
+  return smoothBuf;
+}
+
 
 function initBigScopes(){
   const wrap = document.getElementById("bigScopes");
@@ -306,13 +323,21 @@ function drawBigScopes(){
   for(let ch=0; ch<16; ch++){
 
     const analyser = synth.channelAnalysers[ch];
+
     const buf = new Uint8Array(analyser.fftSize);
     analyser.getByteTimeDomainData(buf);
 
-    // ⭐ 波形固定
+    // ⭐ 滑らか補間
+    const smoothBuf = smoothBufs[ch];
+
+    for(let i=0;i<buf.length;i++){
+      smoothBuf[i] = smoothBuf[i] * 0.9 + (buf[i] / 255) * 0.1;
+    }
+
+    // ⭐ 波形固定（トリガ）
     let trigger = 0;
-    for(let i=1;i<buf.length;i++){
-      if(buf[i-1] < 128 && buf[i] >= 128){
+    for(let i=1;i<smoothBuf.length;i++){
+      if(smoothBuf[i-1] < 0.5 && smoothBuf[i] >= 0.5){
         trigger = i;
         break;
       }
@@ -324,13 +349,19 @@ function drawBigScopes(){
     const h = canvas.clientHeight;
 
     ctx.clearRect(0,0,w,h);
-
     ctx.beginPath();
 
+    const step = smoothBuf.length / w;
+
     for(let i=0;i<w;i++){
-      const index = (i + trigger) % buf.length;
-      const v = buf[index]/255;
-      const y = (1-v)*h;
+      const index = Math.floor(i * step + trigger) % smoothBuf.length;
+      const v = smoothBuf[index];
+const gain = 2.0; // ← 波形の大きさ（1〜5くらい）
+
+const centered = (v - 0.5) * gain + 0.5;
+const y = (1 - centered) * h;
+
+      //const y = (1 - v) * h;
 
       if(i===0) ctx.moveTo(i,y);
       else ctx.lineTo(i,y);
@@ -1350,7 +1381,7 @@ this.channelPanners = [];
     for (let i = 0; i < 16; i++) {
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-analyser.smoothingTimeConstant = 0.85;
+analyser.smoothingTimeConstant = 0.99;
       const gain = audioCtx.createGain();
       gain.gain.value = 1.0;
 const pan = audioCtx.createStereoPanner();
