@@ -314,6 +314,7 @@ function resizeBigScopes(){
     s.ctx.setTransform(dpr,0,0,dpr,0,0);
   });
 }
+const lastTrigger = new Array(16).fill(0);
 
 window.addEventListener("resize", resizeBigScopes);
 function drawBigScopes(){
@@ -335,14 +336,22 @@ function drawBigScopes(){
     }
 
     // ⭐ 波形固定（トリガ）
-    let trigger = 0;
+    let trigger = lastTrigger[ch];
+let found = false;
     for(let i=1;i<smoothBuf.length;i++){
-      if(smoothBuf[i-1] < 0.5 && smoothBuf[i] >= 0.5){
+      if(smoothBuf[i-1] < 0.9 && smoothBuf[i] >= 0.9){
         trigger = i;
+found = true;
         break;
       }
     }
-
+if(found){
+  if(Math.abs(trigger - lastTrigger[ch]) < 50){
+    lastTrigger[ch] = trigger;
+  }
+}else{
+  trigger = lastTrigger[ch];
+}
     const {canvas, ctx} = bigScopes[ch];
 
     const w = canvas.clientWidth;
@@ -350,8 +359,8 @@ function drawBigScopes(){
 
     ctx.clearRect(0,0,w,h);
     ctx.beginPath();
-
-    const step = smoothBuf.length / w;
+const zoom = 8;
+    const step = (smoothBuf.length / w)/zoom;
 
     for(let i=0;i<w;i++){
       const index = Math.floor(i * step + trigger) % smoothBuf.length;
@@ -1381,7 +1390,7 @@ this.channelPanners = [];
     for (let i = 0; i < 16; i++) {
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-analyser.smoothingTimeConstant = 0.99;
+analyser.smoothingTimeConstant = 0.85;
       const gain = audioCtx.createGain();
       gain.gain.value = 1.0;
 const pan = audioCtx.createStereoPanner();
