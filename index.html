@@ -259,7 +259,7 @@ height:20px;
   
   <div class="log" id="log"></div>
 
-<div id="keyboards" ></div>
+<div id="keyboards" style="display:none"></div>
 
 <div id="bigScopes" style="display:none"></div>
 
@@ -2463,7 +2463,12 @@ function animate(synth) {
 }
 
 // ============ UI ============
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const audioCtx = new AudioContext({
+  sampleRate: 96000
+});
+//const audioCtx = new (window.AudioContext({
+ // sampleRate: 96000
+//}) || window.webkitAudioContext)();
 
 loadDefaultSoundFont();
 const sf2Input = document.getElementById('sf2File');
