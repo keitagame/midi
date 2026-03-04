@@ -1435,6 +1435,7 @@ this.chorusLFO.frequency.value = 0.8;
 
 this.chorusLFODepth = audioCtx.createGain();
 this.chorusLFODepth.gain.value = 0.003; // 揺れ幅
+this.lastPitchBend = new Array(16).fill(8192); // センターで初期化
 
 this.chorusLFO.connect(this.chorusLFODepth);
 this.chorusLFODepth.connect(this.chorusDelay.delayTime);
@@ -1484,6 +1485,74 @@ for (let ch = 0; ch < 16; ch++) {
   
 
   }
+pitchBend(ch, value14) {
+  const normalized = (value14 - 8192) / 8192;
+  this.channelPitchBend[ch] = normalized;
+
+  const bendRange = 2; // ±2半音
+
+  this.activeNotes.forEach(noteObj => {
+    if (noteObj.channel !== ch) return;
+
+    const bendSemitone = normalized * bendRange;
+    const rate = Math.pow(2, bendSemitone / 12);
+
+    noteObj.source.playbackRate.value = rate;
+  });
+}
+pitchBend(ch, value14) {
+  const normalized = (value14 - 8192) / 8192;
+  this.channelPitchBend[ch] = normalized;
+
+  const bendRange = 2; // ±2 semitone
+
+  this.activeNotes.forEach(noteObj => {
+    if (noteObj.channel !== ch) return;
+
+    const bendSemitone = normalized * bendRange;
+    const bendRate = Math.pow(2, bendSemitone / 12);
+
+    noteObj.source.playbackRate.value =
+      noteObj.baseRate * bendRate;   // ← ここが重要
+  });
+}
+pitchBend(channel, value) {
+  const now = this.audioCtx.currentTime;
+
+  // 前回値を保存
+  const start = this.lastPitchBend[channel];
+  const end = value;
+  this.lastPitchBend[channel] = value;
+
+  // 変化量（14bit → semitone）
+  const bendRange = 2; // ±2 semitone
+  const startBend = (start - 8192) / 8192 * bendRange;
+  const endBend   = (end   - 8192) / 8192 * bendRange;
+
+  // 50ms かけてゆっくり変化
+  const duration = 0.05;
+
+  for (const [key, noteObj] of this.activeNotes) {
+    if (noteObj.channel !== channel) continue;
+
+    const { note, source, entry } = noteObj;
+
+    // ピッチ計算（noteOn と同じ式）
+    const basePitch =
+      note
+      - entry.rootKey
+      + entry.coarseTune
+      + entry.fineTune / 100
+      + (entry.pitchCorrection ?? 0) / 100;
+
+    const startRate = Math.pow(2, (basePitch + startBend) / 12);
+    const endRate   = Math.pow(2, (basePitch + endBend) / 12);
+
+    source.playbackRate.cancelScheduledValues(now);
+    source.playbackRate.setValueAtTime(startRate, now);
+    source.playbackRate.linearRampToValueAtTime(endRate, now + duration);
+  }
+}
 
   prepareSamples() {
     if (!this.sf.sampleData || !this.sf.samples) {
@@ -2011,13 +2080,13 @@ if (!result) return;
     const source = this.audioCtx.createBufferSource();
     
     source.buffer = sampleInfo.buffer;
-
+const baseRate = source.playbackRate.value;
 const cents = sampleInfo.pitchCorrection || 0;
  const bendRange = 0; // semitone
 const pitchCorrection =
   (entry.pitchCorrection ?? 0) / 100; // cents → semitone
-const bend =
-  (this.channelPitchBend[channel] - 8192) / 8192 * bendRange;
+const bend = this.channelPitchBend[channel]*bendRange;
+  //(this.channelPitchBend[channel] - 8192) / 8192 * bendRange;
 
 const pitch =
   note
@@ -2064,9 +2133,7 @@ let gmGain =
   vel * 
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
-  if(channel == 9){
-    gmGain +=1.0;
-   }
+ 
 const attGain = attenuationToGain(entry.attenuation);
 
 const base = gmGain;
@@ -2121,8 +2188,17 @@ gain.connect(this.choSendByCh[channel]);
     gain.connect(panNode);
 panNode.connect(this.channelGains[channel]);
     source.start(scheduleTime);
-    
-    this.activeNotes.set(key, { source, gain, startTime: scheduleTime });
+    this.activeNotes.set(key, {
+  source,
+  gain,
+  startTime: scheduleTime,
+  channel: channel,
+  note: note,
+baseRate: baseRate,
+entry:entry, // ← これを追加 
+sampleInfo:sampleInfo
+});
+   // this.activeNotes.set(key, { source, gain, startTime: scheduleTime });
   }
 
   noteOff(channel, note, when) {
@@ -2213,7 +2289,7 @@ function clearKeyboard() {
 }
 function drawChannelWave(ch){
 
-  console.log(chvelocity[ch]);
+  //console.log(chvelocity[ch]);
   let a = chvelocity[ch];
   const v = document.querySelector(`.vel${a}.ch${ch}`);
   if(v) v.classList.remove("active");
@@ -2528,6 +2604,24 @@ midiInput.addEventListener('change', async (e) => {
   }
 });
 initBigScopes();
+function smoothPitchBend(ch, start, end, duration = 200) {
+  const steps = 30; // 滑らかさ
+  const stepTime = duration / steps;
+  let current = 0;
+
+  const timer = setInterval(() => {
+    current++;
+    const t = current / steps;
+    const value = Math.round(start + (end - start) * t);
+
+    synth.pitchBend(ch, value);
+
+    if (current >= steps) {
+      clearInterval(timer);
+    }
+  }, stepTime);
+}
+
 playBtn.addEventListener('click', () => {
   //if (!parsed || !soundFont);
   if (audioCtx.state === "suspended") {
@@ -2655,10 +2749,22 @@ keyOff(ch, note);
 }
 
 case 0xE: {
-  const value = (ev.p2 << 7) | ev.p1; // 0–16383
-  synth.channelPitchBend[ch] = value - 8192;
+console.log("pitchBend");
+  const value = (ev.p2 << 7) | ev.p1;
+  if (useSoundfont) {
+    synth.pitchBend(ch, value);
+  }
   break;
 }
+//case 0xE: {
+ // const target = (ev.p2 << 7) | ev.p1; // 本来のピッチベンド値
+ // const current = synth.channelPitchBend[ch] ?? 8192; // チャンネルごとに保持
+
+ // smoothPitchBend(ch, current, target, 200);
+
+ // synth.channelPitchBend[ch] = target;
+ // break;
+//}
 
     case 0xC: {
       if (useSoundfont) {
