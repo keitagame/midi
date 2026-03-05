@@ -80,8 +80,11 @@ margin-bottom:6px;
   gap:0px;
   margin-top:0px;
 }
-
+.keyboard{
+  position: relative;
+}
 .kbRow{
+  position: relative;
   display:flex;
   align-items:center;
   gap:0px;
@@ -614,13 +617,13 @@ function isBlack(note){ return blackNotes.includes(note % 12); }
 
 function buildKeyboardForChannel(ch){
   const row = document.createElement("div");
-  row.className = "kbRow";
+  row.className = `kbRow ch${ch}`;
   const col = document.createElement("div");
   col.className = "kbCol";
 const kLabel = document.createElement("div");
   kLabel.textContent = `KNB:`;
   kLabel.className = `kLabel ch${ch}`;
-  // チャンネル情報エリア
+  // チャンネル情報エリア 
   const info = document.createElement("div");
   info.className = "chInfo";
 
@@ -645,7 +648,7 @@ col.appendChild(bb);
   
 
   const kb = document.createElement("div");
-  kb.className = "keyboard";
+  kb.className = `keyboard ch${ch}`;
 
   // 既存の鍵盤生成はそのまま
   let x = 0;
@@ -1551,6 +1554,33 @@ pitchBend(channel, value) {
     source.playbackRate.cancelScheduledValues(now);
     source.playbackRate.setValueAtTime(startRate, now);
     source.playbackRate.linearRampToValueAtTime(endRate, now + duration);
+    let start = null;
+const durations = 400; // 0.05秒
+const targetValue = endBend;
+
+function animate(timestamp) {
+  if (!start) start = timestamp;
+  let progress = timestamp - start;
+  let yes = 0;
+  // 経過割合を計算 (0.0 〜 1.0)
+  let fraction = Math.min(progress / durations, 1);
+  
+  // 値を更新
+  let currentVal = fraction * targetValue*50;
+  
+document.querySelector(`.keyboard.ch${channel}`).style.left=0+currentVal+'px';
+  if (progress < durations) {
+    requestAnimationFrame(animate);
+yes = 1;
+  }
+  if(yes == 0){
+  currentVal = 0;
+  document.querySelector(`.keyboard.ch${channel}`).style.left=0+currentVal+'px';
+  }
+}
+
+requestAnimationFrame(animate);
+
   }
 }
 
