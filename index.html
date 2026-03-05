@@ -262,7 +262,7 @@ height:20px;
   
   <div class="log" id="log"></div>
 
-<div id="keyboards" style=""></div>
+<div id="keyboards" style="display:none"></div>
 
 <div id="bigScopes" style="display:none"></div>
 
@@ -2157,13 +2157,16 @@ const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
 const progGain = this.channelProgramGain[channel] ?? 1.0;
    let vol = this.channelVolume[channel] / 127;
-   
+  
 const expr = this.channelExpression[channel] / 127;
 let gmGain =
   vel * 
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
  
+   if(channel == 9){
+    gmGain += 1.0;
+   }
 const attGain = attenuationToGain(entry.attenuation);
 
 const base = gmGain;
