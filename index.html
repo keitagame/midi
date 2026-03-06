@@ -262,7 +262,7 @@ height:20px;
   
   <div class="log" id="log"></div>
 
-<div id="keyboards" style="display:none"></div>
+<div id="keyboards" style=""></div>
 
 <div id="bigScopes" style="display:none"></div>
 
@@ -1533,7 +1533,7 @@ pitchBend(channel, value) {
   const endBend   = (end   - 8192) / 8192 * bendRange;
 
   // 50ms かけてゆっくり変化
-  const duration = 0.05;
+  const duration = 0.0005;
 
   for (const [key, noteObj] of this.activeNotes) {
     if (noteObj.channel !== channel) continue;
@@ -2714,9 +2714,9 @@ if (inputMode === 'realtime') {
       const deltaMs = evTimeMs - (now - startTicks);
       for(let ch=0;ch<16;ch++){
         
-    drawChannelWave(ch);
+   // drawChannelWave(ch);
   }
-  drawBigScopes();
+  //drawBigScopes();
       if (deltaMs <= lookAhead * 1000) {
         // スケジュール時刻を計算（最小でも現在時刻+10msを保証）
         const scheduleTime = Math.max(audioNow + deltaMs / 1000, audioNow + 0.01);
@@ -2781,14 +2781,14 @@ keyOff(ch, note);
   break;
 }
 
-//case 0xE: {
+case 0xE: {
 //console.log("pitchBend");
-//  const value = (ev.p2 << 7) | ev.p1;
-//  if (useSoundfont) {
- //   synth.pitchBend(ch, value);
- // }
- // break;
-//}
+  const value = (ev.p2 << 7) | ev.p1;
+  if (useSoundfont) {
+   synth.pitchBend(ch, value);
+  }
+ break;
+}
 //case 0xE: {
  // const target = (ev.p2 << 7) | ev.p1; // 本来のピッチベンド値
  // const current = synth.channelPitchBend[ch] ?? 8192; // チャンネルごとに保持
@@ -2830,8 +2830,8 @@ keyOff(ch, note);
   //animate(synth);
   setInterval(()=>{
   if(!melodyChManual){
-    updateMelodyScoreByVolume();
-    detectMelodyChannel();
+    //updateMelodyScoreByVolume();
+    //detectMelodyChannel();
   }
 }, 100);
 
