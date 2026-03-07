@@ -255,6 +255,7 @@ height:20px;
 <button id="recBtn">REC</button>
 <button id="recStopBtn" disabled>REC STOP</button>
   <button id="playBtn">Play</button>
+ <button id="ca">Pro</button>
   <button id="stopBtn">Stop</button>
   
   <div id="visualizer" style="display:grid; grid-template-columns:repeat(4,1fr); gap:0px; margin:20px 0;">
@@ -268,6 +269,43 @@ height:20px;
 
 
 <script>
+  document.getElementById("ca").onclick = async () => {
+  const audioContext = new AudioContext();
+
+  // AudioWorklet を動的に生成（1ファイルで完結させるため）
+  const workletCode = `
+    class InvertProcessor extends AudioWorkletProcessor {
+      process(inputs, outputs) {
+        const input = inputs[0];
+        const output = outputs[0];
+        if (input && input[0]) {
+          const inputCh = input[0];
+          const outputCh = output[0];
+          for (let i = 0; i < inputCh.length; i++) {
+            outputCh[i] = -inputCh[i]; // ★ 波形反転
+          }
+        }
+        return true;
+      }
+    }
+    registerProcessor("invert-processor", InvertProcessor);
+  `;
+
+  // Blob → URL → AudioWorklet に登録
+  const blob = new Blob([workletCode], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+  await audioContext.audioWorklet.addModule(url);
+
+  // マイク取得
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const source = audioContext.createMediaStreamSource(stream);
+
+  // WorkletNode 作成
+  const invertNode = new AudioWorkletNode(audioContext, "invert-processor");
+
+  // 接続
+  source.connect(invertNode).connect(audioContext.destination);
+};
 const bigScopes = [];
 let smoothBuf = new Float32Array(2048);
 const smoothBufs = Array.from({length:16}, () => new Float32Array(2048));
@@ -2660,7 +2698,9 @@ playBtn.addEventListener('click', () => {
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
+  
 
+  
   const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
   const useSoundfont = outputMode === 'soundfont' || outputMode === 'both';
   const useMidiOutput = outputMode === 'midi' || outputMode === 'both';
