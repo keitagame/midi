@@ -2809,6 +2809,54 @@ keyOff(ch, note);
       }
       break;
     }
+         case 0xB: {
+  const cc = ev.p1;
+  const val = ev.p2 ?? 0;
+
+  // Bank Select
+  if (cc === 0) {
+    synth.channelBankMSB[ch] = val;
+    break;
+  }
+  if (cc === 32) {
+    synth.channelBankLSB[ch] = val;
+    break;
+  }
+
+  // All Sound Off (CC120)
+  if (cc === 120) {
+    if (useSoundfont) synth.allSoundOff(ch);
+   
+    break;
+  }
+
+  // Reset All Controllers (CC121)
+  if (cc === 121) {
+    if (useSoundfont) synth.resetAllControllers(ch);
+    break;
+  }
+
+  // All Notes Off (CC123)
+  if (cc === 123) {
+    if (useSoundfont) synth.allNotesOff(ch);
+   
+    break;
+  }
+
+  // Hold Pedal (CC64)
+  if (cc === 64) {
+    sustainPedal[ch] = val >= 64;
+    if (!sustainPedal[ch]) {
+   
+    }
+    break;
+  }
+
+  // その他の CC
+  synth.controlChange(ch, cc, val);
+  break;
+}
+         
     case 0xB: { // ← evtType は 0xB（11）です
   const cc = ev.p1;
   const val = ev.p2 ?? 0;
