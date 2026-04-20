@@ -289,6 +289,41 @@ height:20px;
     }
     registerProcessor("invert-processor", InvertProcessor);
   `;
+function computePlaybackRate(sample, instrumentZone, presetZone, note) {
+  // 1. root key
+  let root = sample.originalPitch;
+
+  const instOverride = instrumentZone.find(g => g.oper === 58);
+  if (instOverride) root = instOverride.amount;
+
+  const presetOverride = presetZone.find(g => g.oper === 58);
+  if (presetOverride) root = presetOverride.amount;
+
+  // 2. coarse / fine tune
+  let coarse = 0;
+  let fine = 0;
+
+  const instCoarse = instrumentZone.find(g => g.oper === 51);
+  if (instCoarse) coarse = instCoarse.amount;
+
+  const instFine = instrumentZone.find(g => g.oper === 52);
+  if (instFine) fine = instFine.amount;
+
+  const presetCoarse = presetZone.find(g => g.oper === 51);
+  if (presetCoarse) coarse += presetCoarse.amount;
+
+  const presetFine = presetZone.find(g => g.oper === 52);
+  if (presetFine) fine += presetFine.amount;
+
+  // 3. pitch correction
+  const pitchInCents =
+      (note - root) * 100 +
+      sample.pitchCorrection +
+      coarse * 100 +
+      fine;
+
+  return Math.pow(2, pitchInCents / 1200);
+}
 
   // Blob → URL → AudioWorklet に登録
   const blob = new Blob([workletCode], { type: "application/javascript" });
@@ -1069,8 +1104,14 @@ class SoundFontParser {
               if (smplChunk && smplChunk.offset + smplChunk.size <= this.data.byteLength) {
                 this.offset = smplChunk.offset;
                 const start = this.offset;
-                const sampleCount = Math.floor(smplChunk.size / 2);
+                //const sampleCount = Math.floor(smplChunk.size / 2);
+                /*
                 this.sampleData = new Int16Array(this.data.buffer, start, sampleCount);
+                */
+                const pcmStart = smplChunk.offset + 8;  // ← これが正しい
+                const sampleCount = smplChunk.size / 2;
+                this.sampleData = new Int16Array(this.data.buffer, pcmStart, sampleCount);
+
                 console.log('Sample data loaded:', smplChunk.size, 'bytes,', sampleCount, 'samples');
               }
             } else if (listType === 'pdta') {
@@ -1279,6 +1320,19 @@ class SoundFontParser {
       console.warn('Error parsing instruments:', e.message);
     }
   }
+resolveRootKey(sample, instrumentZone, presetZone) {
+  let root = sample.originalPitch;
+
+  // Instrument generator override
+  const instOverride = instrumentZone.find(g => g.oper === 58);
+  if (instOverride) root = instOverride.amount;
+
+  // Preset generator override
+  const presetOverride = presetZone.find(g => g.oper === 58);
+  if (presetOverride) root = presetOverride.amount;
+
+  return root;
+}
 
   parseSampleHeaders(size) {
     const count = Math.floor(size / 46);
@@ -1325,7 +1379,7 @@ class SoundFontParser {
         if (bytesRead !== 46) {
           console.error(`Sample ${i}: Read ${bytesRead} bytes instead of 46!`);
         }
-
+/*
         tempSamples.push({
           name: name.trim(),
           start,
@@ -1339,6 +1393,21 @@ class SoundFontParser {
           zure: zure,
           attenuation: 0  
         });
+        */
+        tempSamples.push({
+  name: name.trim(),
+  start,
+  end,
+  startLoop,
+  endLoop,
+  sampleRate,
+  originalPitch: validOriginalPitch,      // ← 修正
+  pitchCorrection: validPitchCorrection,  // ← 修正
+  sampleType,
+  zure: 60 - validOriginalPitch,
+  attenuation: 0
+});
+
       }
       
       console.log(`  Read ${tempSamples.length} sample headers`);
@@ -2178,6 +2247,31 @@ const pitch =
 
 source.playbackRate.value = Math.pow(2, pitch / 12);
 
+// --- SoundFont 仕様に基づく正しいピッチ計算 ---
+
+// 1. root key（修正2: overridingRootKey を entry.rootKey に反映済みである前提）
+let root = entry.rootKey;
+
+// 2. coarse / fine tune（修正3）
+let coarse = entry.coarseTune || 0;   // semitone
+let fine   = entry.fineTune   || 0;   // cents
+
+// 3. sample header の pitchCorrection（cents）
+let correction = sampleInfo.pitchCorrection || 0;
+
+// 4. pitch bend（semitone）
+//let bend = this.channelPitchBend[channel] * bendRange;
+
+// 5. 最終的なピッチ（cent単位）
+let pitchInCents =
+    (note - root) * 100 +
+    correction +
+    coarse * 100 +
+    fine +
+    bend * 100;
+
+// 6. playbackRate に変換
+source.playbackRate.value = Math.pow(2, pitchInCents / 1200);
 
 
 
