@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8" />
 <title>webmidi</title>
-    
 <style>
     @font-face {
   font-family: "Renner";
@@ -1495,7 +1494,8 @@ this.reverb.connect(this.reverbGain);
 this.reverbGain.connect(this.master);
 this.recordDest = null;
 this.channelPolyCount = new Array(16).fill(0);
-
+this.sustainPedal = new Array(16).fill(false);
+this.sustainHold = new Array(16).fill().map(()=>new Set());
     this.activeNotes = new Map();
    
     // ★チャンネルごとのSend（固定）
@@ -1757,9 +1757,21 @@ case 93: // Chorus Send
   break;
 
 
-    case 64:  // Sustain
-      this.sustain = val >= 64;
-      break;
+    case 64: {
+  const on = val >= 64;
+  this.sustainPedal[ch] = on;
+
+  if (!on) {
+    const now = this.audioCtx.currentTime;
+
+    this.sustainHold[ch].forEach(note => {
+      this._noteOffNow(ch, note, now);
+    });
+
+    this.sustainHold[ch].clear();
+  }
+  break;
+}
 
     case 121: // Reset All Controllers
       this.channelVolume[ch] = 100;
@@ -2271,10 +2283,32 @@ sampleInfo:sampleInfo
 });
    // this.activeNotes.set(key, { source, gain, startTime: scheduleTime });
   }
+_noteOffNow(ch, note){
+  const key = `${ch}-${note}`;
+  const noteObj = this.activeNotes.get(key);
+  if (!noteObj) return;
 
+  const { gain, source } = noteObj;
+
+  const now = this.audioCtx.currentTime;
+
+  // フェードアウト
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(gain.gain.value, now);
+  gain.gain.linearRampToValueAtTime(0, now + 0.1);
+
+  source.stop(now + 0.1);
+
+  this.activeNotes.delete(key);
+}
   noteOff(channel, note, when) {
-
-    const key = `${channel}-${note}`;
+if (this.sustainPedal[channel]) {
+    // サステイン中 → 保留
+    this.sustainHold[channel].add(note);
+    return;
+  }
+  this._noteOffNow(channel, note, when);
+   /* const key = `${channel}-${note}`;
     const info = this.activeNotes.get(key);
     if (!info) return;
     
@@ -2294,11 +2328,37 @@ sampleInfo:sampleInfo
     return;
     }
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.05);
-    source.stop(scheduleTime + 0.05);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.1);
+    source.stop(scheduleTime + 0.03);
     
     this.activeNotes.delete(key);
+    */
   }
+  _noteOffNow(channel, note, when) {
+  const key = `${channel}-${note}`;
+  const info = this.activeNotes.get(key);
+  if (!info) return;
+
+  const { source, gain } = info;
+
+  this.channelPolyCount[channel] =
+    Math.max(0, this.channelPolyCount[channel] - 1);
+
+  const now = this.audioCtx.currentTime;
+  const scheduleTime = Math.max(when || now, now);
+
+  if (channel == 9) {
+    gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.2);
+    source.stop(scheduleTime + 0.22);
+  } else {
+    gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.1);
+    source.stop(scheduleTime + 0.1); // ← ここも修正（0.03だと短すぎ）
+  }
+
+  this.activeNotes.delete(key);
+}
 allNotesOff(ch) {
   const now = this.audioCtx.currentTime;
 
