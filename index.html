@@ -271,6 +271,8 @@ height:20px;
   document.getElementById("ca").onclick = async () => {
   const audioContext = new AudioContext();
 
+
+
   // AudioWorklet を動的に生成（1ファイルで完結させるため）
   const workletCode = `
     class InvertProcessor extends AudioWorkletProcessor {
@@ -1690,7 +1692,168 @@ requestAnimationFrame(animate);
 
   }
 }
+makeEmptyZone() {
+  return {
+    keyLo: 0,
+    keyHi: 127,
+    attenuation: 0,   // 0.1 dB
+    coarseTune: 0,    // semitone
+    fineTune: 0,      // cent
+    rootKey: null,
+  };
+}
 
+mergeZones(base, add) {
+  return {
+    keyLo: (add.keyLo !== undefined ? add.keyLo : base.keyLo),
+    keyHi: (add.keyHi !== undefined ? add.keyHi : base.keyHi),
+    attenuation: base.attenuation + (add.attenuation || 0),
+    coarseTune: base.coarseTune + (add.coarseTune || 0),
+    fineTune: base.fineTune + (add.fineTune || 0),
+    rootKey: (add.rootKey !== undefined && add.rootKey !== null)
+      ? add.rootKey
+      : base.rootKey,
+  };
+}
+parseInstrumentZones(sf, instrumentIdx) {
+  const inst = sf.instruments[instrumentIdx];
+  const bagStart = inst.instBagNdx;
+  const nextInst = sf.instruments[instrumentIdx + 1];
+  const bagEnd = nextInst ? nextInst.instBagNdx : sf.instrumentBags.length;
+
+  const globalZone = this.makeEmptyZone();
+  const localZones = []; // { sampleIdx, zone }
+
+  function s16(v) {
+    return (v & 0x8000) ? v - 0x10000 : v;
+  }
+
+  for (let bagIdx = bagStart; bagIdx < bagEnd; bagIdx++) {
+    const bag = sf.instrumentBags[bagIdx];
+    if (!bag) continue;
+
+    const genStart = bag.genNdx;
+    const genEnd = (sf.instrumentBags[bagIdx + 1] && sf.instrumentBags[bagIdx + 1].genNdx) || sf.instrumentGens.length;
+
+    let zoneDelta = {};
+    let sampleIdx = null;
+
+    for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
+      const gen = sf.instrumentGens[genIdx];
+      if (!gen) continue;
+
+      switch (gen.oper) {
+        case 43: { // keyRange
+          const lo = gen.amount & 0xff;
+          const hi = (gen.amount >> 8) & 0xff;
+          zoneDelta.keyLo = lo;
+          zoneDelta.keyHi = hi;
+          break;
+        }
+        case 48: { // attenuation
+          zoneDelta.attenuation = (zoneDelta.attenuation || 0) + gen.amount;
+          break;
+        }
+        case 51: { // coarseTune
+          zoneDelta.coarseTune = (zoneDelta.coarseTune || 0) + s16(gen.amount);
+          break;
+        }
+        case 52: { // fineTune
+          zoneDelta.fineTune = (zoneDelta.fineTune || 0) + s16(gen.amount);
+          break;
+        }
+        case 58: { // overridingRootKey
+          zoneDelta.rootKey = gen.amount;
+          break;
+        }
+        case 53: { // sampleID
+          sampleIdx = gen.amount;
+          break;
+        }
+      }
+    }
+
+    if (sampleIdx === null) {
+      // global instrument zone
+      const merged = this.mergeZones(globalZone, zoneDelta);
+      Object.assign(globalZone, merged);
+    } else {
+      // local instrument zone
+      const zone = this.mergeZones(globalZone, zoneDelta);
+      localZones.push({ sampleIdx, zone });
+    }
+  }
+
+  return { globalZone, localZones };
+}
+
+parsePresetZones(sf, presetIdx) {
+  const preset = sf.presets[presetIdx];
+  const bagStart = preset.presetBagNdx;
+  const nextPreset = sf.presets[presetIdx + 1];
+  const bagEnd = nextPreset ? nextPreset.presetBagNdx : sf.presetBags.length;
+
+  const globalZone = this.makeEmptyZone();
+  const localZones = []; // { instrumentIdx, zone }
+
+  for (let bagIdx = bagStart; bagIdx < bagEnd; bagIdx++) {
+    const bag = sf.presetBags[bagIdx];
+    if (!bag) continue;
+
+    const genStart = bag.genNdx;
+    const genEnd = (sf.presetBags[bagIdx + 1] && sf.presetBags[bagIdx + 1].genNdx) || sf.presetGens.length;
+
+    let zoneDelta = {};
+    let instrumentIdx = null;
+
+    for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
+      const gen = sf.presetGens[genIdx];
+      if (!gen) continue;
+
+      switch (gen.oper) {
+        case 43: { // keyRange
+          const lo = gen.amount & 0xff;
+          const hi = (gen.amount >> 8) & 0xff;
+          zoneDelta.keyLo = lo;
+          zoneDelta.keyHi = hi;
+          break;
+        }
+        case 48: { // attenuation
+          zoneDelta.attenuation = (zoneDelta.attenuation || 0) + gen.amount;
+          break;
+        }
+        case 51: { // coarseTune
+          zoneDelta.coarseTune = (zoneDelta.coarseTune || 0) + gen.amount;
+          break;
+        }
+        case 52: { // fineTune
+          zoneDelta.fineTune = (zoneDelta.fineTune || 0) + gen.amount;
+          break;
+        }
+        case 58: { // overridingRootKey
+          zoneDelta.rootKey = gen.amount;
+          break;
+        }
+        case 41: { // instrument
+          instrumentIdx = gen.amount;
+          break;
+        }
+      }
+    }
+
+    if (instrumentIdx === null) {
+      // global preset zone
+      const merged = this.mergeZones(globalZone, zoneDelta);
+      Object.assign(globalZone, merged);
+    } else {
+      // local preset zone
+      const zone =this. mergeZones(globalZone, zoneDelta);
+      localZones.push({ instrumentIdx, zone });
+    }
+  }
+
+  return { globalZone, localZones };
+}
   prepareSamples() {
     if (!this.sf.sampleData || !this.sf.samples) {
       console.warn('No sample data available');
@@ -2051,6 +2214,91 @@ this.programToSamples.set(key, samplesForProgram);
     console.log(`\nMapping complete: ${this.programToSamples.size} programs successfully mapped`);
     console.log(`Programs with samples:`, Array.from(this.programToSamples.keys()).slice(0, 20));
   }
+  buildProgramMapping(compatMode = "ALL") {
+  console.log("Building program to sample mapping...");
+  this.programToSamples.clear();
+
+  for (let presetIdx = 0; presetIdx < this.sf.presets.length; presetIdx++) {
+    const preset = this.sf.presets[presetIdx];
+    const program = preset.preset;
+    const bank = preset.bank;
+
+    if (compatMode === "GM") {
+      if (bank !== 0 && bank !== 128) continue;
+    }
+
+    const key = bank + ":" + program;
+    const samplesForProgram = new Array(128);
+
+    const parsedPreset = this.parsePresetZones(this.sf, presetIdx);
+    const presetGlobal = parsedPreset.globalZone;
+    const presetLocals = parsedPreset.localZones;
+
+    for (let i = 0; i < presetLocals.length; i++) {
+      const pz = presetLocals[i];
+      const instrumentIdx = pz.instrumentIdx;
+      if (instrumentIdx >= this.sf.instruments.length) continue;
+
+      const parsedInst = this.parseInstrumentZones(this.sf, instrumentIdx);
+      const instGlobal = parsedInst.globalZone;
+      const instLocals = parsedInst.localZones;
+
+      for (let j = 0; j < instLocals.length; j++) {
+        const iz = instLocals[j];
+        const sampleIdx = iz.sampleIdx;
+        if (!this.sampleBuffers.has(sampleIdx)) continue;
+
+        const sampleInfo = this.sampleBuffers.get(sampleIdx);
+
+        // presetGlobal + presetLocal + instGlobal + instLocal を合成
+        const combinedZone = this.mergeZones(
+          this.mergeZones(presetGlobal, pz.zone),
+          this.mergeZones(instGlobal, iz.zone)
+        );
+
+        const finalLo = Math.max(combinedZone.keyLo, 0);
+        const finalHi = Math.min(combinedZone.keyHi, 127);
+
+        const rootKey =
+          (combinedZone.rootKey !== null && combinedZone.rootKey !== undefined)
+            ? combinedZone.rootKey
+            : (Number.isFinite(sampleInfo.originalPitch)
+                ? sampleInfo.originalPitch
+                : 60);
+
+        for (let note = finalLo; note <= finalHi; note++) {
+          const newEntry = {
+            sampleIdx,
+            rootKey,
+            attenuation: combinedZone.attenuation,
+            coarseTune: combinedZone.coarseTune,
+            fineTune: combinedZone.fineTune,
+            sampleInfo,
+          };
+
+          const prev = samplesForProgram[note];
+          if (!prev) {
+            samplesForProgram[note] = newEntry;
+          } else {
+            const prevDiff = Math.abs(prev.rootKey - note);
+            const newDiff = Math.abs(newEntry.rootKey - note);
+            if (newDiff < prevDiff) {
+              samplesForProgram[note] = newEntry;
+            }
+          }
+        }
+      }
+    }
+
+    const mappedNotes = samplesForProgram.filter(function (s) { return s !== undefined; }).length;
+    if (mappedNotes > 0) {
+      this.programToSamples.set(key, samplesForProgram);
+    }
+  }
+
+  console.log("Mapping complete: " + this.programToSamples.size + " programs successfully mapped");
+}
+
 setRecordDestination(destNode) {
   // destNode は MediaStreamAudioDestinationNode
   // nullなら録音OFF
