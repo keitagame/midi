@@ -1965,19 +1965,28 @@ setPan(ch, value) {
 
 controlChange(ch, cc, val) {
   switch (cc) {
-    case 7:   // Volume
+    /*case 7:   // Volume
       this.channelVolume[ch] = val;
       break;
-
+*/
     case 10:  // Pan
       this.setPan(ch,val);
       this.channelPan[ch] = val;
       break;
 
+case 7: // Volume
+  this.channelVolume[ch] = val;
+  this.updateChannelVolume(ch);
+  break;
+/*
+case 11: // Expression
+  this.channelExpression[ch] = val;
+  this.updateChannelVolume(ch);
+  break;
     case 11:  // Expression
       this.channelExpression[ch] = val;
       break;
-
+*/
     case 91: // Reverb Send
   this.channelReverbSend[ch] = val;
   this.revSendByCh[ch].gain.setTargetAtTime(val / 127, this.audioCtx.currentTime, 0.02);
@@ -2443,7 +2452,23 @@ noteNumberToName(n) {
   const name = names[n % 12];
   return `${name}${octave}`;
 }
+updateChannelVolume(ch) {
+  const now = this.audioCtx.currentTime;
 
+  const vol  = this.channelVolume[ch] / 127;
+  const expr = this.channelExpression[ch] / 127;
+
+  this.activeNotes.forEach(note => {
+    if (note.channel !== ch) return;
+
+    // ベロシティも保持してる前提
+    const vel = note.velocity / 127;
+
+    const target = vol * expr * vel;
+
+    note.gain.gain.setTargetAtTime(target, now, 0.01);
+  });
+}
 
 
   noteOn(channel, note, velocity, when) {
@@ -2556,9 +2581,7 @@ let gmGain =
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
  
-   if(channel == 9){
-    gmGain += 1.0;
-   }
+   
 const attGain = attenuationToGain(entry.attenuation);
 
 const base = gmGain;
@@ -2576,7 +2599,13 @@ gain.gain.linearRampToValueAtTime(
   gmGain,
   scheduleTime + 0
 );
+//const vol = this.channelVolume[ch] / 127;
+//const expr = this.channelExpression[ch] / 127;
+//const vel = velocity / 127;
 
+//const finalGain = vol * expr * vel;
+const finalGain = Math.pow(vol * expr * vel, 2);
+gain.gain.setValueAtTime(finalGain, when);
 
 
 
