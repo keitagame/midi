@@ -149,6 +149,10 @@ height:20px;
 
 
 }
+#pianoRoll{
+width:800px;
+height:300px;
+}
 #bigScopes{
   margin-top:20px;
   border-top:1px solid #333;
@@ -264,13 +268,13 @@ height:20px;
 
 <div id="keyboards" style=""></div>
 
-<div id="bigScopes" style="display:none"></div>
+<div id="bigScopes" style=""></div>
 
-
+<canvas id="pianoRoll" width="800" height="300"></canvas>
 <script>
+
   document.getElementById("ca").onclick = async () => {
   const audioContext = new AudioContext();
-
 
 
   // AudioWorklet を動的に生成（1ファイルで完結させるため）
@@ -358,6 +362,32 @@ function getSmoothWave(analyser, ch){
   }
 
   return smoothBuf;
+}
+const rollCanvas = document.getElementById("pianoRoll");
+const rollCtx = rollCanvas.getContext("2d");
+
+const pianoNotes = [];
+const activeRollNotes = new Map();
+
+function drawPianoRoll() {
+  const now = audioCtx.currentTime;
+
+  rollCtx.clearRect(0, 0, rollCanvas.width, rollCanvas.height);
+
+  const pxPerSec = 100; // スクロール速度
+  const noteHeight = 4;
+
+  pianoNotes.forEach(n => {
+    const x = (n.startTime - now) * pxPerSec + 100;
+    const w = (n.endTime - n.startTime) * pxPerSec;
+
+    const y = rollCanvas.height - (n.note * noteHeight);
+
+    rollCtx.fillStyle = "lime";
+    rollCtx.fillRect(x, y, w, noteHeight);
+  });
+
+  requestAnimationFrame(drawPianoRoll);
 }
 
 
@@ -2460,16 +2490,39 @@ updateChannelVolume(ch) {
 
   this.activeNotes.forEach(note => {
     if (note.channel !== ch) return;
-
+    if (!Number.isFinite(note.gain)) note.gain = 0;
+if (!isFinite(note.gain)){
     // ベロシティも保持してる前提
     const vel = note.velocity / 127;
-
+    
     const target = vol * expr * vel;
+
+    note.gain.gain.setTargetAtTime(target, now, 0.01);
+}
+  });
+}
+updateChannelVolume(ch) {
+  const now = this.audioCtx.currentTime;
+
+  const vol  = this.channelVolume[ch] / 127;
+  const expr = this.channelExpression[ch] / 127;
+
+  this.activeNotes.forEach(note => {
+    if (note.channel !== ch) return;
+
+    // 🚨 GainNode存在チェック
+    if (!note.gain || !note.gain.gain) return;
+
+    const vel = (note.velocity ?? 127) / 127;
+
+    let target = vol * expr * vel;
+
+    // 🚨 数値チェック（ここが本来必要）
+    if (!Number.isFinite(target)) target = 0;
 
     note.gain.gain.setTargetAtTime(target, now, 0.01);
   });
 }
-
 
   noteOn(channel, note, velocity, when) {
    // noteOn 側
@@ -3105,7 +3158,7 @@ midiInput.addEventListener('change', async (e) => {
     log(`Error loading MIDI: ${err.message}`);
   }
 });
-initBigScopes();
+//initBigScopes();
 function smoothPitchBend(ch, start, end, duration = 200) {
   const steps = 30; // 滑らかさ
   const stepTime = duration / steps;
@@ -3129,13 +3182,13 @@ playBtn.addEventListener('click', () => {
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
-  
+  //drawPianoRoll();
 
   
   const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'soundfont';
   const useSoundfont = outputMode === 'soundfont' || outputMode === 'both';
   const useMidiOutput = outputMode === 'midi' || outputMode === 'both';
-  //initVisualizer();
+ // initVisualizer();
 const inputMode =
   document.querySelector('input[name="inputMode"]:checked')?.value || 'file';
 
@@ -3171,6 +3224,27 @@ if (inputMode === 'realtime') {
     // ★SC-88が落ち着くのを待つ
     
   }
+function onNoteOnVisual(ch, note, velocity, time) {
+  const key = `${ch}-${note}`;
+  activeRollNotes.set(key, {
+    note,
+    startTime: time
+  });
+}
+
+function onNoteOffVisual(ch, note, time) {
+  const key = `${ch}-${note}`;
+  const n = activeRollNotes.get(key);
+  if (!n) return;
+
+  n.endTime = time;
+  pianoNotes.push(n);
+
+  activeRollNotes.delete(key);
+}
+//const rollCanvas = document.getElementById("pianoRoll");
+//const rollCtx = rollCanvas.getContext("2d");
+
   function step() {
     if (!isPlaying) return;
    
@@ -3185,7 +3259,7 @@ if (inputMode === 'realtime') {
       const deltaMs = evTimeMs - (now - startTicks);
       for(let ch=0;ch<16;ch++){
         
-   // drawChannelWave(ch);
+    drawChannelWave(ch);
   }
   //drawBigScopes();
       if (deltaMs <= lookAhead * 1000) {
@@ -3209,6 +3283,8 @@ if (inputMode === 'realtime') {
       if (vel > 0) {
         // SoundFont再生
         if (useSoundfont) {
+
+//onNoteOnVisual(ch, note,vel, now);
           synth.noteOn(ch, note, vel, scheduleTime);
         }
         keyOn(ch, note);
@@ -3218,6 +3294,7 @@ if (inputMode === 'realtime') {
         }
       } else {
         if (useSoundfont) {
+//onNoteOffVisual(ch, note, now);
           synth.noteOff(ch, note, scheduleTime);
 
         }
@@ -3231,6 +3308,7 @@ keyOff(ch, note);
     case 0x8: {
  const note = ev.p1;
       if (useSoundfont) {
+//onNoteOffVisual(ch, ev.p1, now);
         synth.noteOff(ch, ev.p1, scheduleTime);
 
       }
