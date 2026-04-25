@@ -2519,7 +2519,7 @@ updateChannelVolume(ch) {
     let target = vol * expr * vel;
 
     // 🚨 数値チェック（ここが本来必要）
-    if (!Number.isFinite(target)) target = 0;
+    //if (!Number.isFinite(target)) target = 0;
 
     note.gain.gain.setTargetAtTime(target, now, 0.01);
   });
@@ -2572,7 +2572,7 @@ const pitch =
   + (sampleInfo.pitchCorrection ?? 0) / 100
   + bend;
 
-source.playbackRate.value = Math.pow(2, pitch / 12);
+//source.playbackRate.value = Math.pow(2, pitch / 12);
 
 // --- SoundFont 仕様に基づく正しいピッチ計算 ---
 
@@ -2617,8 +2617,12 @@ source.playbackRate.value = Math.pow(2, pitchInCents / 1200);
    
     // ベロシティベースの音量調整
     const gain = this.audioCtx.createGain();
+/*
     const vel = Math.pow(velocity / 127, 0.4);
-
+*/
+const vel = Number.isFinite(velocity)
+  ? velocity / 127
+  : 1;
 const isMelody = (channel == melodyCh);
 
 const melodyGain = isMelody ? 1.8 : 1.0;
@@ -2627,11 +2631,22 @@ const melodyGain = isMelody ? 1.8 : 1.0;
 const poly = Math.max(1, this.channelPolyCount[channel]);
 const polyComp = channel === 9 ? 1.0 : 1 / Math.sqrt(poly);
 const progGain = this.channelProgramGain[channel] ?? 1.0;
-   let vol = this.channelVolume[channel] / 127;
+   /*let vol = this.channelVolume[channel] / 127;
   
-const expr = this.channelExpression[channel] / 127;
+const expr = this.channelExpression[channel] / 127;*/
+const vol = Number.isFinite(this.channelVolume[channel])
+  ? this.channelVolume[channel] / 127
+  : 100/127;
+
+const expr = Number.isFinite(this.channelExpression[channel])
+  ? this.channelExpression[channel] / 127
+  : 127/127;
 let gmGain =
   vel * 
+/*
+vol*
+expr;*/
+
   (this.channelVolume[channel] / 127) *
   (this.channelExpression[channel] / 127);
  
@@ -2658,7 +2673,8 @@ gain.gain.linearRampToValueAtTime(
 //const vel = velocity / 127;
 
 //const finalGain = vol * expr * vel;
-const finalGain = Math.pow(vol * expr * vel, 2);
+let finalGain = Math.pow(vol * expr * vel, 2);
+
 gain.gain.setValueAtTime(finalGain, when);
 
 
@@ -3212,7 +3228,7 @@ if (inputMode === 'realtime') {
   const tempoMap = buildTempoMap(parsed.tracks, division);
   const all = collectAllEvents(parsed.tracks);
   
-  const startTicks = performance.now();
+  let startTicks = performance.now();
   let idx = 0;
   let isPlaying = true;
   
@@ -3368,13 +3384,46 @@ case 0xE: {
         break;
       }
     }
-    
+    /*
     if (idx < all.length && isPlaying) {
       setTimeout(step, 10);
     } else if (isPlaying) {
       log("Finished.");
       
+    }*/
+const loopEnabled = true; // ←追加（後でボタン化もできる）
+
+if (idx < all.length && isPlaying) {
+  setTimeout(step, 1);
+
+} else if (isPlaying) {
+
+  if (loopEnabled) {
+
+    log("Loop restart");
+
+    // 念のため残ノート全部止める
+    if (synth) {
+      const now = audioCtx.currentTime;
+      for (const key of synth.activeNotes.keys()) {
+        const [ch,note] = key.split("-").map(Number);
+        synth.noteOff(ch,note,now);
+      }
     }
+
+    clearAllKeys();
+
+    // 再スタート
+    idx = 0;
+    startTicks = performance.now(); // ←もし constなら let に変更
+
+    setTimeout(step,50);
+
+  } else {
+    log("Finished.");
+  }
+
+}
   }
   
   
