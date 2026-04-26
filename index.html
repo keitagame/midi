@@ -2512,7 +2512,7 @@ updateChannelVolume(ch) {
     if (note.channel !== ch) return;
 
     // 🚨 GainNode存在チェック
-    if (!note.gain || !note.gain.gain) return;
+    //if (!note.gain || !note.gain.gain) return;
 
     const vel = (note.velocity ?? 127) / 127;
 
@@ -2736,9 +2736,9 @@ _noteOffNow(ch, note){
   // フェードアウト
   gain.gain.cancelScheduledValues(now);
   gain.gain.setValueAtTime(gain.gain.value, now);
-  gain.gain.linearRampToValueAtTime(0, now + 0.1);
+  gain.gain.linearRampToValueAtTime(0, now + 0);
 
-  source.stop(now + 0.1);
+  source.stop(now + 0);
 
   this.activeNotes.delete(key);
 }
@@ -2794,8 +2794,8 @@ if (this.sustainPedal[channel]) {
     source.stop(scheduleTime + 0.22);
   } else {
     gain.gain.setValueAtTime(gain.gain.value, scheduleTime);
-    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.1);
-    source.stop(scheduleTime + 0.1); // ← ここも修正（0.03だと短すぎ）
+    gain.gain.linearRampToValueAtTime(0, scheduleTime + 0.0);
+    source.stop(scheduleTime + 0.0); // ← ここも修正（0.03だと短すぎ）
   }
 
   this.activeNotes.delete(key);
