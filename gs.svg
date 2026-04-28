@@ -1,0 +1,14 @@
+ <svg  xmlns="http://www.w3.org/2000/svg" width="600" height="400"
+       style="position:absolute; top:0; left:0;">
+
+    <!-- ここに手動トレースしたパスを書く -->
+    <path d="M140 30 L315 30 L255 95 L170 95 L115 155 L170 220 L210 220 L246 178 L172 178 L225 125 L290 125 L340 178 L235 285 L145 285 L20 155 Z"
+          fill="white"
+          stroke="none"
+          stroke-width="2" />
+       <path d="M360 30 L455 30 L390 95 L480 180 L280 370 L200 370 L380 180 L300 95 Z"
+          fill="white"
+          stroke="none"
+          stroke-width="2" />
+
+  </svg>
